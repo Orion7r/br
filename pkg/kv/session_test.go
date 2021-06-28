@@ -17,7 +17,8 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/parser/mysql"
+	"github.com/DigitalChinaOpenSource/DCParser/mysql"
+	tidbkv "github.com/pingcap/tidb/kv"
 )
 
 type kvSuite struct{}
@@ -28,8 +29,9 @@ func TestKV(t *testing.T) {
 	TestingT(t)
 }
 
-func (s *kvSuite) TestSession(c *C) {
+func (s *kvSuite) TestSetOption(c *C) {
 	session := newSession(&SessionOptions{SQLMode: mysql.ModeNone, Timestamp: 1234567890, RowFormatVersion: "1"})
-	_, err := session.Txn(true)
+	txn, err := session.Txn(true)
 	c.Assert(err, IsNil)
+	txn.SetOption(tidbkv.Priority, tidbkv.PriorityHigh)
 }

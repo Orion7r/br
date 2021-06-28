@@ -17,6 +17,7 @@ set -eu
 DB="$TEST_NAME"
 TABLE="usertable"
 DB_COUNT=3
+old_conf=$(run_sql "show config where name = 'alter-primary-key'")
 
 for i in $(seq $DB_COUNT); do
     run_sql "CREATE DATABASE $DB${i};"
@@ -33,28 +34,13 @@ export GO_FAILPOINTS="github.com/pingcap/br/pkg/backup/reset-retryable-error=1*r
 run_br --pd $PD_ADDR backup full -s "local://$TEST_DIR/$DB-limit" --concurrency 4
 export GO_FAILPOINTS=""
 
-# backup full and let TiKV returns an unknown error, to test whether we can gracefully stop.
-echo "backup with unretryable error start..."
-export GO_FAILPOINTS="github.com/pingcap/br/pkg/backup/reset-not-retryable-error=1*return(true)"
-run_br --pd $PD_ADDR backup full -s "local://$TEST_DIR/$DB-no-retryable" --concurrency 4 &
-pid=$!
-export GO_FAILPOINTS=""
-sleep 15
-if ps -q $pid ; then
-    echo "After failed 15 seconds, BR doesn't gracefully shutdown..."
-    exit 1
-fi
-
-
 # backup full
 echo "backup with lz4 start..."
-export GO_FAILPOINTS="github.com/pingcap/br/pkg/backup/backup-storage-error=1*return(\"connection refused\")"
-run_br --pd $PD_ADDR backup full -s "local://$TEST_DIR/$DB-lz4" --concurrency 4 --compression lz4
-export GO_FAILPOINTS=""
+run_br --pd "http://$PD_ADDR" backup full -s "local://$TEST_DIR/$DB-lz4" --concurrency 4 --compression lz4
 size_lz4=$(du -d 0 $TEST_DIR/$DB-lz4 | awk '{print $1}')
 
 echo "backup with zstd start..."
-run_br --pd $PD_ADDR backup full -s "local://$TEST_DIR/$DB-zstd" --concurrency 4 --compression zstd --compression-level 6
+run_br --pd "http://$PD_ADDR" backup full -s "local://$TEST_DIR/$DB-zstd" --concurrency 4 --compression zstd --compression-level 6
 size_zstd=$(du -d 0 $TEST_DIR/$DB-zstd | awk '{print $1}')
 
 if [ "$size_lz4" -le "$size_zstd" ]; then
@@ -69,9 +55,7 @@ for ct in limit lz4 zstd; do
 
   # restore full
   echo "restore with $ct backup start..."
-  export GO_FAILPOINTS="github.com/pingcap/br/pkg/restore/restore-storage-error=1*return(\"connection refused\")"
   run_br restore full -s "local://$TEST_DIR/$DB-$ct" --pd $PD_ADDR --ratelimit 1024
-  export GO_FAILPOINTS=""
 
   for i in $(seq $DB_COUNT); do
       row_count_new[${i}]=$(run_sql "SELECT COUNT(*) FROM $DB${i}.$TABLE;" | awk '/COUNT/{print $2}')
@@ -89,8 +73,13 @@ for ct in limit lz4 zstd; do
   if $fail; then
       echo "TEST: [$TEST_NAME] failed!"
       exit 1
+  else
+      echo "TEST: [$TEST_NAME] successed!"
   fi
 done
+
+# test whether we have changed the cluster config.
+test "$old_conf" = "$(run_sql "show config where name = 'alter-primary-key'")"
 
 for i in $(seq $DB_COUNT); do
     run_sql "DROP DATABASE $DB${i};"

@@ -9,25 +9,20 @@ import (
 	"io"
 	"io/ioutil"
 	"net/url"
-	"path"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/aws/client"
 	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
-	"github.com/pingcap/errors"
-	backuppb "github.com/pingcap/kvproto/pkg/backup"
-	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
-	"go.uber.org/zap"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/backup"
 
 	berrors "github.com/pingcap/br/pkg/errors"
 )
@@ -42,28 +37,17 @@ const (
 	s3ProviderOption     = "s3.provider"
 	notFound             = "NotFound"
 	// number of retries to make of operations.
-	maxRetries = 7
-	// max number of retries when meets error
-	maxErrorRetries = 3
+	maxRetries = 6
 
 	// the maximum number of byte to read for seek.
 	maxSkipOffsetByRead = 1 << 16 // 64KB
-
-	// TODO make this configurable, 5 mb is a good minimum size but on low latency/high bandwidth network you can go a lot bigger
-	hardcodedS3ChunkSize = 5 * 1024 * 1024
 )
-
-var permissionCheckFn = map[Permission]func(*s3.S3, *backuppb.S3) error{
-	AccessBuckets: checkS3Bucket,
-	ListObjects:   listObjects,
-	GetObject:     getObject,
-}
 
 // S3Storage info for s3 storage.
 type S3Storage struct {
 	session *session.Session
 	svc     s3iface.S3API
-	options *backuppb.S3
+	options *backup.S3
 }
 
 // S3Uploader does multi-part upload to s3.
@@ -75,7 +59,7 @@ type S3Uploader struct {
 
 // UploadPart update partial data to s3, we should call CreateMultipartUpload to start it,
 // and call CompleteMultipartUpload to finish it.
-func (u *S3Uploader) Write(ctx context.Context, data []byte) (int, error) {
+func (u *S3Uploader) UploadPart(ctx context.Context, data []byte) error {
 	partInput := &s3.UploadPartInput{
 		Body:          bytes.NewReader(data),
 		Bucket:        u.createOutput.Bucket,
@@ -87,17 +71,17 @@ func (u *S3Uploader) Write(ctx context.Context, data []byte) (int, error) {
 
 	uploadResult, err := u.svc.UploadPartWithContext(ctx, partInput)
 	if err != nil {
-		return 0, errors.Trace(err)
+		return errors.Trace(err)
 	}
 	u.completeParts = append(u.completeParts, &s3.CompletedPart{
 		ETag:       uploadResult.ETag,
 		PartNumber: partInput.PartNumber,
 	})
-	return len(data), nil
+	return nil
 }
 
-// Close complete multi upload request.
-func (u *S3Uploader) Close(ctx context.Context) error {
+// CompleteUpload complete multi upload request.
+func (u *S3Uploader) CompleteUpload(ctx context.Context) error {
 	completeInput := &s3.CompleteMultipartUploadInput{
 		Bucket:   u.createOutput.Bucket,
 		Key:      u.createOutput.Key,
@@ -125,8 +109,8 @@ type S3BackendOptions struct {
 	UseAccelerateEndpoint bool   `json:"use-accelerate-endpoint" toml:"use-accelerate-endpoint"`
 }
 
-// Apply apply s3 options on backuppb.S3.
-func (options *S3BackendOptions) Apply(s3 *backuppb.S3) error {
+// Apply apply s3 options on backup.S3.
+func (options *S3BackendOptions) Apply(s3 *backup.S3) error {
 	if options.Region == "" {
 		options.Region = "us-east-1"
 	}
@@ -218,7 +202,7 @@ func (options *S3BackendOptions) parseFromFlags(flags *pflag.FlagSet) error {
 }
 
 // NewS3StorageForTest creates a new S3Storage for testing only.
-func NewS3StorageForTest(svc s3iface.S3API, options *backuppb.S3) *S3Storage {
+func NewS3StorageForTest(svc s3iface.S3API, options *backup.S3) *S3Storage {
 	return &S3Storage{
 		session: nil,
 		svc:     svc,
@@ -230,21 +214,21 @@ func NewS3StorageForTest(svc s3iface.S3API, options *backuppb.S3) *S3Storage {
 //
 // Deprecated: Create the storage via `New()` instead of using this.
 func NewS3Storage( // revive:disable-line:flag-parameter
-	backend *backuppb.S3,
+	backend *backup.S3,
 	sendCredential bool,
 ) (*S3Storage, error) {
 	return newS3Storage(backend, &ExternalStorageOptions{
-		SendCredentials:  sendCredential,
-		CheckPermissions: []Permission{AccessBuckets},
+		SendCredentials: sendCredential,
+		SkipCheckPath:   false,
 	})
 }
 
-func newS3Storage(backend *backuppb.S3, opts *ExternalStorageOptions) (*S3Storage, error) {
+func newS3Storage(backend *backup.S3, opts *ExternalStorageOptions) (*S3Storage, error) {
 	qs := *backend
 	awsConfig := aws.NewConfig().
+		WithMaxRetries(maxRetries).
 		WithS3ForcePathStyle(qs.ForcePathStyle).
 		WithRegion(qs.Region)
-	request.WithRetryer(awsConfig, defaultS3Retryer())
 	if qs.Endpoint != "" {
 		awsConfig.WithEndpoint(qs.Endpoint)
 	}
@@ -283,25 +267,14 @@ func newS3Storage(backend *backuppb.S3, opts *ExternalStorageOptions) (*S3Storag
 	}
 
 	c := s3.New(ses)
-	// TODO remove it after BR remove cfg skip-check-path
 	if !opts.SkipCheckPath {
-		err = checkS3Bucket(c, &qs)
+		err = checkS3Bucket(c, qs.Bucket)
 		if err != nil {
 			return nil, errors.Annotatef(berrors.ErrStorageInvalidConfig, "Bucket %s is not accessible: %v", qs.Bucket, err)
 		}
 	}
 
-	if len(qs.Prefix) > 0 && !strings.HasSuffix(qs.Prefix, "/") {
-		qs.Prefix += "/"
-	}
-
-	for _, p := range opts.CheckPermissions {
-		err := permissionCheckFn[p](c, &qs)
-		if err != nil {
-			return nil, errors.Annotatef(berrors.ErrStorageInvalidPermission, "check permission %s failed due to %v", p, err)
-		}
-	}
-
+	qs.Prefix += "/"
 	return &S3Storage{
 		session: ses,
 		svc:     c,
@@ -310,49 +283,16 @@ func newS3Storage(backend *backuppb.S3, opts *ExternalStorageOptions) (*S3Storag
 }
 
 // checkBucket checks if a bucket exists.
-func checkS3Bucket(svc *s3.S3, qs *backuppb.S3) error {
+func checkS3Bucket(svc *s3.S3, bucket string) error {
 	input := &s3.HeadBucketInput{
-		Bucket: aws.String(qs.Bucket),
+		Bucket: aws.String(bucket),
 	}
 	_, err := svc.HeadBucket(input)
 	return errors.Trace(err)
 }
 
-// listObjects checks the permission of listObjects
-func listObjects(svc *s3.S3, qs *backuppb.S3) error {
-	input := &s3.ListObjectsInput{
-		Bucket:  aws.String(qs.Bucket),
-		Prefix:  aws.String(qs.Prefix),
-		MaxKeys: aws.Int64(1),
-	}
-	_, err := svc.ListObjects(input)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	return nil
-}
-
-// getObject checks the permission of getObject
-func getObject(svc *s3.S3, qs *backuppb.S3) error {
-	input := &s3.GetObjectInput{
-		Bucket: aws.String(qs.Bucket),
-		Key:    aws.String("not-exists"),
-	}
-	_, err := svc.GetObject(input)
-	if aerr, ok := err.(awserr.Error); ok {
-		if aerr.Code() == "NoSuchKey" {
-			// if key not exists and we reach this error, that
-			// means we have the correct permission to GetObject
-			// other we will get another error
-			return nil
-		}
-		return errors.Trace(err)
-	}
-	return nil
-}
-
-// WriteFile writes data to a file to storage.
-func (rs *S3Storage) WriteFile(ctx context.Context, file string, data []byte) error {
+// Write write to s3 storage.
+func (rs *S3Storage) Write(ctx context.Context, file string, data []byte) error {
 	input := &s3.PutObjectInput{
 		Body:   aws.ReadSeekCloser(bytes.NewReader(data)),
 		Bucket: aws.String(rs.options.Bucket),
@@ -383,17 +323,16 @@ func (rs *S3Storage) WriteFile(ctx context.Context, file string, data []byte) er
 	return errors.Trace(err)
 }
 
-// ReadFile reads the file from the storage and returns the contents.
-func (rs *S3Storage) ReadFile(ctx context.Context, file string) ([]byte, error) {
+// Read read file from s3.
+func (rs *S3Storage) Read(ctx context.Context, file string) ([]byte, error) {
 	input := &s3.GetObjectInput{
 		Bucket: aws.String(rs.options.Bucket),
 		Key:    aws.String(rs.options.Prefix + file),
 	}
+
 	result, err := rs.svc.GetObjectWithContext(ctx, input)
 	if err != nil {
-		return nil, errors.Annotatef(err,
-			"failed to read s3 file, file info: input.bucket='%s', input.key='%s'",
-			*input.Bucket, *input.Key)
+		return nil, errors.Trace(err)
 	}
 	defer result.Body.Close()
 	data, err := ioutil.ReadAll(result.Body)
@@ -433,20 +372,20 @@ func (rs *S3Storage) WalkDir(ctx context.Context, opt *WalkOption, fn func(strin
 	if opt == nil {
 		opt = &WalkOption{}
 	}
-	prefix := path.Join(rs.options.Prefix, opt.SubDir)
-	if len(prefix) > 0 && !strings.HasSuffix(prefix, "/") {
+	prefix := rs.options.Prefix + opt.SubDir
+	if !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
 	maxKeys := int64(1000)
 	if opt.ListCount > 0 {
 		maxKeys = opt.ListCount
 	}
+
 	req := &s3.ListObjectsInput{
 		Bucket:  aws.String(rs.options.Bucket),
 		Prefix:  aws.String(prefix),
 		MaxKeys: aws.Int64(maxKeys),
 	}
-
 	for {
 		// FIXME: We can't use ListObjectsV2, it is not universally supported.
 		// (Ceph RGW supported ListObjectsV2 since v15.1.0, released 2020 Jan 30th)
@@ -489,7 +428,7 @@ func (rs *S3Storage) URI() string {
 }
 
 // Open a Reader by file path.
-func (rs *S3Storage) Open(ctx context.Context, path string) (ExternalFileReader, error) {
+func (rs *S3Storage) Open(ctx context.Context, path string) (ReadSeekCloser, error) {
 	reader, r, err := rs.open(ctx, path, 0, 0)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -597,8 +536,7 @@ type s3ObjectReader struct {
 	// reader context used for implement `io.Seek`
 	// currently, lightning depends on package `xitongsys/parquet-go` to read parquet file and it needs `io.Seeker`
 	// See: https://github.com/xitongsys/parquet-go/blob/207a3cee75900b2b95213627409b7bac0f190bb3/source/source.go#L9-L10
-	ctx      context.Context
-	retryCnt int
+	ctx context.Context
 }
 
 // Read implement the io.Reader interface.
@@ -608,26 +546,6 @@ func (r *s3ObjectReader) Read(p []byte) (n int, err error) {
 		maxCnt = int64(len(p))
 	}
 	n, err = r.reader.Read(p[:maxCnt])
-	// TODO: maybe we should use !errors.Is(err, io.EOF) here to avoid error lint, but currently, pingcap/errors
-	// doesn't implement this method yet.
-	if err != nil && errors.Cause(err) != io.EOF && r.retryCnt < maxErrorRetries { //nolint:errorlint
-		// if can retry, reopen a new reader and try read again
-		end := r.rangeInfo.End + 1
-		if end == r.rangeInfo.Size {
-			end = 0
-		}
-		_ = r.reader.Close()
-
-		newReader, _, err1 := r.storage.open(r.ctx, r.name, r.pos, end)
-		if err1 != nil {
-			log.Warn("open new s3 reader failed", zap.String("file", r.name), zap.Error(err1))
-			return
-		}
-		r.reader = newReader
-		r.retryCnt++
-		n, err = r.reader.Read(p[:maxCnt])
-	}
-
 	r.pos += int64(n)
 	return
 }
@@ -683,24 +601,11 @@ func (r *s3ObjectReader) Seek(offset int64, whence int) (int64, error) {
 }
 
 // CreateUploader create multi upload request.
-func (rs *S3Storage) CreateUploader(ctx context.Context, name string) (ExternalFileWriter, error) {
+func (rs *S3Storage) CreateUploader(ctx context.Context, name string) (Uploader, error) {
 	input := &s3.CreateMultipartUploadInput{
 		Bucket: aws.String(rs.options.Bucket),
 		Key:    aws.String(rs.options.Prefix + name),
 	}
-	if rs.options.Acl != "" {
-		input = input.SetACL(rs.options.Acl)
-	}
-	if rs.options.Sse != "" {
-		input = input.SetServerSideEncryption(rs.options.Sse)
-	}
-	if rs.options.SseKmsKeyId != "" {
-		input = input.SetSSEKMSKeyId(rs.options.SseKmsKeyId)
-	}
-	if rs.options.StorageClass != "" {
-		input = input.SetStorageClass(rs.options.StorageClass)
-	}
-
 	resp, err := rs.svc.CreateMultipartUploadWithContext(ctx, input)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -710,37 +615,4 @@ func (rs *S3Storage) CreateUploader(ctx context.Context, name string) (ExternalF
 		createOutput:  resp,
 		completeParts: make([]*s3.CompletedPart, 0, 128),
 	}, nil
-}
-
-// Create creates multi upload request.
-func (rs *S3Storage) Create(ctx context.Context, name string) (ExternalFileWriter, error) {
-	uploader, err := rs.CreateUploader(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-	uploaderWriter := newBufferedWriter(uploader, hardcodedS3ChunkSize, NoCompression)
-	return uploaderWriter, nil
-}
-
-// retryerWithLog wrappes the client.DefaultRetryer, and logging when retry triggered.
-type retryerWithLog struct {
-	client.DefaultRetryer
-}
-
-func (rl retryerWithLog) RetryRules(r *request.Request) time.Duration {
-	backoffTime := rl.DefaultRetryer.RetryRules(r)
-	if backoffTime > 0 {
-		log.Warn("failed to request s3, retrying", zap.Error(r.Error), zap.Duration("backoff", backoffTime))
-	}
-	return backoffTime
-}
-
-func defaultS3Retryer() request.Retryer {
-	return retryerWithLog{
-		DefaultRetryer: client.DefaultRetryer{
-			NumMaxRetries:    maxRetries,
-			MinRetryDelay:    1 * time.Second,
-			MinThrottleDelay: 2 * time.Second,
-		},
-	}
 }

@@ -7,17 +7,11 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"sync"
-
-	tidbutils "github.com/pingcap/tidb-tools/pkg/utils"
-
-	berrors "github.com/pingcap/br/pkg/errors"
-
-	"github.com/pingcap/errors"
 
 	// #nosec
 	// register HTTP handler for /debug/pprof
 	_ "net/http/pprof"
+	"sync"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
@@ -29,12 +23,13 @@ var (
 	mu           sync.Mutex
 )
 
-func listen(statusAddr string) (net.Listener, error) {
+// StartPProfListener forks a new goroutine listening on specified port and provide pprof info.
+func StartPProfListener(statusAddr string) {
 	mu.Lock()
 	defer mu.Unlock()
 	if startedPProf != "" {
 		log.Warn("Try to start pprof when it has been started, nothing will happen", zap.String("address", startedPProf))
-		return nil, errors.Annotate(berrors.ErrUnknown, "try to start pprof when it has been started at "+startedPProf)
+		return
 	}
 	failpoint.Inject("determined-pprof-port", func(v failpoint.Value) {
 		port := v.(int)
@@ -44,23 +39,14 @@ func listen(statusAddr string) (net.Listener, error) {
 	listener, err := net.Listen("tcp", statusAddr)
 	if err != nil {
 		log.Warn("failed to start pprof", zap.String("addr", statusAddr), zap.Error(err))
-		return nil, errors.Trace(err)
+		return
 	}
 	startedPProf = listener.Addr().String()
 	log.Info("bound pprof to addr", zap.String("addr", startedPProf))
 	_, _ = fmt.Fprintf(os.Stderr, "bound pprof to addr %s\n", startedPProf)
-	return listener, nil
-}
-
-// StartPProfListener forks a new goroutine listening on specified port and provide pprof info.
-func StartPProfListener(statusAddr string, wrapper *tidbutils.TLS) error {
-	listener, err := listen(statusAddr)
-	if err != nil {
-		return err
-	}
 
 	go func() {
-		if e := http.Serve(wrapper.WrapListener(listener), nil); e != nil {
+		if e := http.Serve(listener, nil); e != nil {
 			log.Warn("failed to serve pprof", zap.String("addr", startedPProf), zap.Error(e))
 			mu.Lock()
 			startedPProf = ""
@@ -68,5 +54,4 @@ func StartPProfListener(statusAddr string, wrapper *tidbutils.TLS) error {
 			return
 		}
 	}()
-	return nil
 }

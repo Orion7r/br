@@ -75,6 +75,8 @@ fi
 if $fail; then
     echo "TEST: [$TEST_NAME] failed!"
     exit 1
+else
+    echo "TEST: [$TEST_NAME] successed!"
 fi
 
 run_sql "DROP DATABASE $DB;"

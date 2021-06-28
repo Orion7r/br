@@ -6,14 +6,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/pingcap/br/pkg/metautil"
-
-	"github.com/pingcap/br/pkg/version"
-
-	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
-	backuppb "github.com/pingcap/kvproto/pkg/backup"
+	"github.com/pingcap/kvproto/pkg/backup"
 	"github.com/pingcap/log"
 	"github.com/pingcap/tidb/config"
 	"github.com/spf13/pflag"
@@ -34,98 +29,41 @@ const (
 	flagOnline   = "online"
 	flagNoSchema = "no-schema"
 
-	// FlagMergeRegionSizeBytes is the flag name of merge small regions by size
-	FlagMergeRegionSizeBytes = "merge-region-size-bytes"
-	// FlagMergeRegionKeyCount is the flag name of merge small regions by key count
-	FlagMergeRegionKeyCount = "merge-region-key-count"
-
 	defaultRestoreConcurrency = 128
 	maxRestoreBatchSizeLimit  = 10240
 	defaultDDLConcurrency     = 16
 )
 
-// RestoreCommonConfig is the common configuration for all BR restore tasks.
-type RestoreCommonConfig struct {
-	Online bool `json:"online" toml:"online"`
-
-	// MergeSmallRegionSizeBytes is the threshold of merging small regions (Default 96MB, region split size).
-	// MergeSmallRegionKeyCount is the threshold of merging smalle regions (Default 960_000, region split key count).
-	// See https://github.com/tikv/tikv/blob/v4.0.8/components/raftstore/src/coprocessor/config.rs#L35-L38
-	MergeSmallRegionSizeBytes uint64 `json:"merge-region-size-bytes" toml:"merge-region-size-bytes"`
-	MergeSmallRegionKeyCount  uint64 `json:"merge-region-key-count" toml:"merge-region-key-count"`
-}
-
-// adjust adjusts the abnormal config value in the current config.
-// useful when not starting BR from CLI (e.g. from BRIE in SQL).
-func (cfg *RestoreCommonConfig) adjust() {
-	if cfg.MergeSmallRegionKeyCount == 0 {
-		cfg.MergeSmallRegionKeyCount = restore.DefaultMergeRegionKeyCount
-	}
-	if cfg.MergeSmallRegionSizeBytes == 0 {
-		cfg.MergeSmallRegionSizeBytes = restore.DefaultMergeRegionSizeBytes
-	}
-}
-
-// DefineRestoreCommonFlags defines common flags for the restore command.
-func DefineRestoreCommonFlags(flags *pflag.FlagSet) {
-	// TODO remove experimental tag if it's stable
-	flags.Bool(flagOnline, false, "(experimental) Whether online when restore")
-
-	flags.Uint64(FlagMergeRegionSizeBytes, restore.DefaultMergeRegionSizeBytes,
-		"the threshold of merging small regions (Default 96MB, region split size)")
-	flags.Uint64(FlagMergeRegionKeyCount, restore.DefaultMergeRegionKeyCount,
-		"the threshold of merging smalle regions (Default 960_000, region split key count)")
-	_ = flags.MarkHidden(FlagMergeRegionSizeBytes)
-	_ = flags.MarkHidden(FlagMergeRegionKeyCount)
-}
-
-// ParseFromFlags parses the config from the flag set.
-func (cfg *RestoreCommonConfig) ParseFromFlags(flags *pflag.FlagSet) error {
-	var err error
-	cfg.Online, err = flags.GetBool(flagOnline)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	cfg.MergeSmallRegionKeyCount, err = flags.GetUint64(FlagMergeRegionKeyCount)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	cfg.MergeSmallRegionSizeBytes, err = flags.GetUint64(FlagMergeRegionSizeBytes)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	return errors.Trace(err)
-}
-
 // RestoreConfig is the configuration specific for restore tasks.
 type RestoreConfig struct {
 	Config
-	RestoreCommonConfig
 
+	Online   bool `json:"online" toml:"online"`
 	NoSchema bool `json:"no-schema" toml:"no-schema"`
 }
 
-// DefineRestoreFlags defines common flags for the restore tidb command.
+// DefineRestoreFlags defines common flags for the restore command.
 func DefineRestoreFlags(flags *pflag.FlagSet) {
+	// TODO remove experimental tag if it's stable
+	flags.Bool(flagOnline, false, "(experimental) Whether online when restore")
 	flags.Bool(flagNoSchema, false, "skip creating schemas and tables, reuse existing empty ones")
+
 	// Do not expose this flag
 	_ = flags.MarkHidden(flagNoSchema)
-
-	DefineRestoreCommonFlags(flags)
 }
 
 // ParseFromFlags parses the restore-related flags from the flag set.
 func (cfg *RestoreConfig) ParseFromFlags(flags *pflag.FlagSet) error {
 	var err error
+	cfg.Online, err = flags.GetBool(flagOnline)
+	if err != nil {
+		return errors.Trace(err)
+	}
 	cfg.NoSchema, err = flags.GetBool(flagNoSchema)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	err = cfg.Config.ParseFromFlags(flags)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	err = cfg.RestoreCommonConfig.ParseFromFlags(flags)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -141,8 +79,7 @@ func (cfg *RestoreConfig) ParseFromFlags(flags *pflag.FlagSet) error {
 // we should set proper value in this function.
 // so that both binary and TiDB will use same default value.
 func (cfg *RestoreConfig) adjustRestoreConfig() {
-	cfg.Config.adjust()
-	cfg.RestoreCommonConfig.adjust()
+	cfg.adjust()
 
 	if cfg.Config.Concurrency == 0 {
 		cfg.Config.Concurrency = defaultRestoreConcurrency
@@ -150,41 +87,6 @@ func (cfg *RestoreConfig) adjustRestoreConfig() {
 	if cfg.Config.SwitchModeInterval == 0 {
 		cfg.Config.SwitchModeInterval = defaultSwitchInterval
 	}
-}
-
-// CheckRestoreDBAndTable is used to check whether the restore dbs or tables have been backup
-func CheckRestoreDBAndTable(client *restore.Client, cfg *RestoreConfig) error {
-	if len(cfg.Schemas) == 0 && len(cfg.Tables) == 0 {
-		return nil
-	}
-	schemas := client.GetDatabases()
-	schemasMap := make(map[string]struct{})
-	tablesMap := make(map[string]struct{})
-	for _, db := range schemas {
-		dbName := db.Info.Name.O
-		if name, ok := utils.GetSysDBName(db.Info.Name); utils.IsSysDB(name) && ok {
-			dbName = name
-		}
-		schemasMap[utils.EncloseName(dbName)] = struct{}{}
-		for _, table := range db.Tables {
-			tablesMap[utils.EncloseDBAndTable(dbName, table.Info.Name.O)] = struct{}{}
-		}
-	}
-	restoreSchemas := cfg.Schemas
-	restoreTables := cfg.Tables
-	for schema := range restoreSchemas {
-		if _, ok := schemasMap[schema]; !ok {
-			return errors.Annotatef(berrors.ErrUndefinedRestoreDbOrTable,
-				"[database: %v] has not been backup, please ensure you has input a correct database name", schema)
-		}
-	}
-	for table := range restoreTables {
-		if _, ok := tablesMap[table]; !ok {
-			return errors.Annotatef(berrors.ErrUndefinedRestoreDbOrTable,
-				"[table: %v] has not been backup, please ensure you has input a correct table name", table)
-		}
-	}
-	return nil
 }
 
 // RunRestore starts a restore task inside the current goroutine.
@@ -195,15 +97,7 @@ func RunRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConf
 	ctx, cancel := context.WithCancel(c)
 	defer cancel()
 
-	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
-		span1 := span.Tracer().StartSpan("task.RunRestore", opentracing.ChildOf(span.Context()))
-		defer span1.Finish()
-		ctx = opentracing.ContextWithSpan(ctx, span1)
-	}
-
-	// Restore needs domain to do DDL.
-	needDomain := true
-	mgr, err := NewMgr(ctx, g, cfg.PD, cfg.TLS, GetKeepalive(&cfg.Config), cfg.CheckRequirements, needDomain)
+	mgr, err := NewMgr(ctx, g, cfg.PD, cfg.TLS, GetKeepalive(&cfg.Config), cfg.CheckRequirements)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -211,7 +105,7 @@ func RunRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConf
 
 	keepaliveCfg := GetKeepalive(&cfg.Config)
 	keepaliveCfg.PermitWithoutStream = true
-	client, err := restore.NewRestoreClient(g, mgr.GetPDClient(), mgr.GetStorage(), mgr.GetTLSConfig(), keepaliveCfg)
+	client, err := restore.NewRestoreClient(g, mgr.GetPDClient(), mgr.GetTiKV(), mgr.GetTLSConfig(), keepaliveCfg)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -221,12 +115,7 @@ func RunRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConf
 	if err != nil {
 		return errors.Trace(err)
 	}
-	opts := storage.ExternalStorageOptions{
-		NoCredentials:   cfg.NoCreds,
-		SendCredentials: cfg.SendCreds,
-		SkipCheckPath:   cfg.SkipCheckPath,
-	}
-	if err = client.SetStorage(ctx, u, &opts); err != nil {
+	if err = client.SetStorage(ctx, u, cfg.SendCreds); err != nil {
 		return errors.Trace(err)
 	}
 	client.SetRateLimit(cfg.RateLimit)
@@ -243,28 +132,19 @@ func RunRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConf
 		return errors.Trace(err)
 	}
 
-	u, s, backupMeta, err := ReadBackupMeta(ctx, metautil.MetaFile, &cfg.Config)
+	u, _, backupMeta, err := ReadBackupMeta(ctx, utils.MetaFile, &cfg.Config)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	g.Record(summary.RestoreDataSize, utils.ArchiveSize(backupMeta))
-	backupVersion := version.NormalizeBackupVersion(backupMeta.ClusterVersion)
-	if cfg.CheckRequirements && backupVersion != nil {
-		if versionErr := version.CheckClusterVersion(ctx, mgr.GetPDClient(), version.CheckVersionForBackup(backupVersion)); versionErr != nil {
-			return errors.Trace(versionErr)
-		}
-	}
-
-	if err = client.InitBackupMeta(c, backupMeta, u, s); err != nil {
+	g.Record("Size", utils.ArchiveSize(backupMeta))
+	if err = client.InitBackupMeta(backupMeta, u); err != nil {
 		return errors.Trace(err)
 	}
 
 	if client.IsRawKvMode() {
 		return errors.Annotate(berrors.ErrRestoreModeMismatch, "cannot do transactional restore from raw kv data")
 	}
-	if err = CheckRestoreDBAndTable(client, cfg); err != nil {
-		return err
-	}
+
 	files, tables, dbs := filterRestoreFiles(client, cfg)
 	if len(dbs) == 0 && len(tables) != 0 {
 		return errors.Annotate(berrors.ErrRestoreInvalidBackup, "contain tables but no databases")
@@ -283,26 +163,13 @@ func RunRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConf
 	// restore checksum will check safe point with its start ts, see details at
 	// https://github.com/pingcap/tidb/blob/180c02127105bed73712050594da6ead4d70a85f/store/tikv/kv.go#L186-L190
 	// so, we should keep the safe point unchangeable. to avoid GC life time is shorter than transaction duration.
-	err = utils.StartServiceSafePointKeeper(ctx, mgr.GetPDClient(), sp)
-	if err != nil {
-		return errors.Trace(err)
-	}
+	utils.StartServiceSafePointKeeper(ctx, mgr.GetPDClient(), sp)
 
 	var newTS uint64
 	if client.IsIncremental() {
 		newTS = restoreTS
 	}
 	ddlJobs := restore.FilterDDLJobs(client.GetDDLJobs(), tables)
-
-	err = client.PreCheckTableTiFlashReplica(ctx, tables)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	err = client.PreCheckTableClusterIndex(tables, ddlJobs, mgr.GetDomain())
-	if err != nil {
-		return errors.Trace(err)
-	}
 
 	// pre-set TiDB config for restore
 	restoreDBConfig := enableTiDBConfig()
@@ -341,7 +208,7 @@ func RunRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConf
 		// Only in binary we can use multi-thread sessions to create tables.
 		// so use OwnStorage() to tell whether we are use binary or SQL.
 		dbPool, err = restore.MakeDBPool(defaultDDLConcurrency, func() (*restore.DB, error) {
-			return restore.NewDB(g, mgr.GetStorage())
+			return restore.NewDB(g, mgr.GetTiKV())
 		})
 	}
 	if err != nil {
@@ -360,8 +227,7 @@ func RunRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConf
 	tableFileMap := restore.MapTableToFiles(files)
 	log.Debug("mapped table to files", zap.Any("result map", tableFileMap))
 
-	rangeStream := restore.GoValidateFileRanges(
-		ctx, tableStream, tableFileMap, cfg.MergeSmallRegionKeyCount, cfg.MergeSmallRegionKeyCount, errCh)
+	rangeStream := restore.GoValidateFileRanges(ctx, tableStream, tableFileMap, errCh)
 
 	rangeSize := restore.EstimateRangeSize(files)
 	summary.CollectInt("restore ranges", rangeSize)
@@ -413,7 +279,7 @@ func RunRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConf
 	// Checksum
 	if cfg.Checksum {
 		finish = client.GoValidateChecksum(
-			ctx, afterRestoreStream, mgr.GetStorage().GetClient(), errCh, updateCh, cfg.ChecksumConcurrency)
+			ctx, afterRestoreStream, mgr.GetTiKV().GetClient(), errCh, updateCh, cfg.ChecksumConcurrency)
 	} else {
 		// when user skip checksum, just collect tables, and drop them.
 		finish = dropToBlackhole(ctx, afterRestoreStream, errCh, updateCh)
@@ -429,10 +295,6 @@ func RunRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConf
 	if err != nil {
 		return errors.Trace(err)
 	}
-
-	// The cost of rename user table / replace into system table wouldn't be so high.
-	// So leave it out of the pipeline for easier implementation.
-	client.RestoreSystemSchemas(ctx, cfg.TableFilter)
 
 	// Set task summary to success status.
 	summary.SetSuccessStatus(true)
@@ -471,17 +333,14 @@ func dropToBlackhole(
 func filterRestoreFiles(
 	client *restore.Client,
 	cfg *RestoreConfig,
-) (files []*backuppb.File, tables []*metautil.Table, dbs []*utils.Database) {
+) (files []*backup.File, tables []*utils.Table, dbs []*utils.Database) {
 	for _, db := range client.GetDatabases() {
 		createdDatabase := false
-		dbName := db.Info.Name.O
-		if name, ok := utils.GetSysDBName(db.Info.Name); utils.IsSysDB(name) && ok {
-			dbName = name
-		}
 		for _, table := range db.Tables {
-			if !cfg.TableFilter.MatchTable(dbName, table.Info.Name.O) {
+			if !cfg.TableFilter.MatchTable(db.Info.Name.O, table.Info.Name.O) {
 				continue
 			}
+
 			if !createdDatabase {
 				dbs = append(dbs, db)
 				createdDatabase = true
@@ -536,7 +395,12 @@ func enableTiDBConfig() func() {
 		// when upstream and downstream both set this value greater than default(3072)
 		conf.MaxIndexLength = config.DefMaxOfMaxIndexLength
 		log.Warn("set max-index-length to max(3072*4) to skip check index length in DDL")
+
+		// we need set this to true, since all create table DDLs will create with tableInfo
+		// and we can handle alter drop pk/add pk DDLs with no impact
+		conf.AlterPrimaryKey = true
 	})
+
 	return restoreConfig
 }
 
@@ -549,7 +413,7 @@ func restoreTableStream(
 	errCh chan<- error,
 ) {
 	// We cache old tables so that we can 'batch' recover TiFlash and tables.
-	oldTables := []*metautil.Table{}
+	oldTables := []*utils.Table{}
 	defer func() {
 		// when things done, we must clean pending requests.
 		batcher.Close()

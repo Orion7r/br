@@ -7,7 +7,7 @@ import (
 	"encoding/binary"
 
 	. "github.com/pingcap/check"
-	backuppb "github.com/pingcap/kvproto/pkg/backup"
+	"github.com/pingcap/kvproto/pkg/backup"
 	"github.com/pingcap/kvproto/pkg/import_sstpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/tidb/tablecodec"
@@ -40,7 +40,7 @@ func (s *testRestoreUtilSuite) TestParseQuoteName(c *C) {
 }
 
 func (s *testRestoreUtilSuite) TestGetSSTMetaFromFile(c *C) {
-	file := &backuppb.File{
+	file := &backup.File{
 		Name:     "file_write.sst",
 		StartKey: []byte("t1a"),
 		EndKey:   []byte("t1ccc"),
@@ -59,7 +59,7 @@ func (s *testRestoreUtilSuite) TestGetSSTMetaFromFile(c *C) {
 }
 
 func (s *testRestoreUtilSuite) TestMapTableToFiles(c *C) {
-	filesOfTable1 := []*backuppb.File{
+	filesOfTable1 := []*backup.File{
 		{
 			Name:     "table1-1.sst",
 			StartKey: tablecodec.EncodeTablePrefix(1),
@@ -76,7 +76,7 @@ func (s *testRestoreUtilSuite) TestMapTableToFiles(c *C) {
 			EndKey:   tablecodec.EncodeTablePrefix(1),
 		},
 	}
-	filesOfTable2 := []*backuppb.File{
+	filesOfTable2 := []*backup.File{
 		{
 			Name:     "table2-1.sst",
 			StartKey: tablecodec.EncodeTablePrefix(2),
@@ -95,73 +95,73 @@ func (s *testRestoreUtilSuite) TestMapTableToFiles(c *C) {
 	c.Assert(result[2], DeepEquals, filesOfTable2)
 }
 
-func (s *testRestoreUtilSuite) TestValidateFileRewriteRule(c *C) {
+func (s *testRestoreUtilSuite) TestValidateFileRanges(c *C) {
 	rules := &restore.RewriteRules{
-		Data: []*import_sstpb.RewriteRule{{
+		Table: []*import_sstpb.RewriteRule{&import_sstpb.RewriteRule{
 			OldKeyPrefix: []byte(tablecodec.EncodeTablePrefix(1)),
 			NewKeyPrefix: []byte(tablecodec.EncodeTablePrefix(2)),
 		}},
 	}
 
 	// Empty start/end key is not allowed.
-	err := restore.ValidateFileRewriteRule(
-		&backuppb.File{
+	_, err := restore.ValidateFileRanges(
+		[]*backup.File{&backup.File{
 			Name:     "file_write.sst",
 			StartKey: []byte(""),
 			EndKey:   []byte(""),
-		},
+		}},
 		rules,
 	)
 	c.Assert(err, ErrorMatches, ".*cannot find rewrite rule.*")
 
 	// Range is not overlap, no rule found.
-	err = restore.ValidateFileRewriteRule(
-		&backuppb.File{
+	_, err = restore.ValidateFileRanges(
+		[]*backup.File{{
 			Name:     "file_write.sst",
 			StartKey: tablecodec.EncodeTablePrefix(0),
 			EndKey:   tablecodec.EncodeTablePrefix(1),
-		},
+		}},
 		rules,
 	)
 	c.Assert(err, ErrorMatches, ".*cannot find rewrite rule.*")
 
 	// No rule for end key.
-	err = restore.ValidateFileRewriteRule(
-		&backuppb.File{
+	_, err = restore.ValidateFileRanges(
+		[]*backup.File{{
 			Name:     "file_write.sst",
 			StartKey: tablecodec.EncodeTablePrefix(1),
 			EndKey:   tablecodec.EncodeTablePrefix(2),
-		},
+		}},
 		rules,
 	)
 	c.Assert(err, ErrorMatches, ".*cannot find rewrite rule.*")
 
 	// Add a rule for end key.
-	rules.Data = append(rules.Data, &import_sstpb.RewriteRule{
+	rules.Table = append(rules.Table, &import_sstpb.RewriteRule{
 		OldKeyPrefix: tablecodec.EncodeTablePrefix(2),
 		NewKeyPrefix: tablecodec.EncodeTablePrefix(3),
 	})
-	err = restore.ValidateFileRewriteRule(
-		&backuppb.File{
+	_, err = restore.ValidateFileRanges(
+		[]*backup.File{{
 			Name:     "file_write.sst",
 			StartKey: tablecodec.EncodeTablePrefix(1),
 			EndKey:   tablecodec.EncodeTablePrefix(2),
-		},
+		}},
 		rules,
 	)
 	c.Assert(err, ErrorMatches, ".*restore table ID mismatch")
 
 	// Add a bad rule for end key, after rewrite start key > end key.
-	rules.Data = append(rules.Data[:1], &import_sstpb.RewriteRule{
+	rules.Table = append(rules.Table[:1], &import_sstpb.RewriteRule{
 		OldKeyPrefix: tablecodec.EncodeTablePrefix(2),
 		NewKeyPrefix: tablecodec.EncodeTablePrefix(1),
 	})
-	err = restore.ValidateFileRewriteRule(
-		&backuppb.File{
+	_, err = restore.ValidateFileRanges(
+		[]*backup.File{{
 			Name:     "file_write.sst",
 			StartKey: tablecodec.EncodeTablePrefix(1),
 			EndKey:   tablecodec.EncodeTablePrefix(2),
-		},
+		}},
 		rules,
 	)
 	c.Assert(err, ErrorMatches, ".*unexpected rewrite rules.*")
@@ -225,46 +225,46 @@ func (s *testRestoreUtilSuite) TestPaginateScanRegion(c *C) {
 	ctx := context.Background()
 	regionMap := make(map[uint64]*restore.RegionInfo)
 	regions := []*restore.RegionInfo{}
-	batch, err := restore.PaginateScanRegion(ctx, NewTestClient(stores, regionMap, 0), []byte{}, []byte{}, 3)
+	batch, err := restore.PaginateScanRegion(ctx, newTestClient(stores, regionMap, 0), []byte{}, []byte{}, 3)
 	c.Assert(err, IsNil)
 	c.Assert(batch, DeepEquals, regions)
 
 	regionMap, regions = makeRegions(1)
-	batch, err = restore.PaginateScanRegion(ctx, NewTestClient(stores, regionMap, 0), []byte{}, []byte{}, 3)
+	batch, err = restore.PaginateScanRegion(ctx, newTestClient(stores, regionMap, 0), []byte{}, []byte{}, 3)
 	c.Assert(err, IsNil)
 	c.Assert(batch, DeepEquals, regions)
 
 	regionMap, regions = makeRegions(2)
-	batch, err = restore.PaginateScanRegion(ctx, NewTestClient(stores, regionMap, 0), []byte{}, []byte{}, 3)
+	batch, err = restore.PaginateScanRegion(ctx, newTestClient(stores, regionMap, 0), []byte{}, []byte{}, 3)
 	c.Assert(err, IsNil)
 	c.Assert(batch, DeepEquals, regions)
 
 	regionMap, regions = makeRegions(3)
-	batch, err = restore.PaginateScanRegion(ctx, NewTestClient(stores, regionMap, 0), []byte{}, []byte{}, 3)
+	batch, err = restore.PaginateScanRegion(ctx, newTestClient(stores, regionMap, 0), []byte{}, []byte{}, 3)
 	c.Assert(err, IsNil)
 	c.Assert(batch, DeepEquals, regions)
 
 	regionMap, regions = makeRegions(8)
-	batch, err = restore.PaginateScanRegion(ctx, NewTestClient(stores, regionMap, 0), []byte{}, []byte{}, 3)
+	batch, err = restore.PaginateScanRegion(ctx, newTestClient(stores, regionMap, 0), []byte{}, []byte{}, 3)
 	c.Assert(err, IsNil)
 	c.Assert(batch, DeepEquals, regions)
 
 	regionMap, regions = makeRegions(8)
 	batch, err = restore.PaginateScanRegion(
-		ctx, NewTestClient(stores, regionMap, 0), regions[1].Region.StartKey, []byte{}, 3)
+		ctx, newTestClient(stores, regionMap, 0), regions[1].Region.StartKey, []byte{}, 3)
 	c.Assert(err, IsNil)
 	c.Assert(batch, DeepEquals, regions[1:])
 
 	batch, err = restore.PaginateScanRegion(
-		ctx, NewTestClient(stores, regionMap, 0), []byte{}, regions[6].Region.EndKey, 3)
+		ctx, newTestClient(stores, regionMap, 0), []byte{}, regions[6].Region.EndKey, 3)
 	c.Assert(err, IsNil)
 	c.Assert(batch, DeepEquals, regions[:7])
 
 	batch, err = restore.PaginateScanRegion(
-		ctx, NewTestClient(stores, regionMap, 0), regions[1].Region.StartKey, regions[1].Region.EndKey, 3)
+		ctx, newTestClient(stores, regionMap, 0), regions[1].Region.StartKey, regions[1].Region.EndKey, 3)
 	c.Assert(err, IsNil)
 	c.Assert(batch, DeepEquals, regions[1:2])
 
-	_, err = restore.PaginateScanRegion(ctx, NewTestClient(stores, regionMap, 0), []byte{2}, []byte{1}, 3)
+	_, err = restore.PaginateScanRegion(ctx, newTestClient(stores, regionMap, 0), []byte{2}, []byte{1}, 3)
 	c.Assert(err, ErrorMatches, ".*startKey >= endKey.*")
 }

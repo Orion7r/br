@@ -11,24 +11,20 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
-	"github.com/pingcap/br/pkg/metautil"
-
-	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
-	backuppb "github.com/pingcap/kvproto/pkg/backup"
+	"github.com/pingcap/kvproto/pkg/backup"
 	"github.com/pingcap/kvproto/pkg/import_sstpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/parser/model"
+	"github.com/DigitalChinaOpenSource/DCParser/model"
 	"github.com/pingcap/tidb/domain"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/statistics/handle"
+	"github.com/pingcap/tidb/store/tikv/oracle"
 	"github.com/pingcap/tidb/tablecodec"
 	"github.com/pingcap/tidb/util/codec"
-	"github.com/tikv/client-go/v2/oracle"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/server/schedule/placement"
 	"go.uber.org/zap"
@@ -44,7 +40,6 @@ import (
 	"github.com/pingcap/br/pkg/glue"
 	"github.com/pingcap/br/pkg/logutil"
 	"github.com/pingcap/br/pkg/pdutil"
-	"github.com/pingcap/br/pkg/redact"
 	"github.com/pingcap/br/pkg/storage"
 	"github.com/pingcap/br/pkg/summary"
 	"github.com/pingcap/br/pkg/utils"
@@ -65,7 +60,7 @@ type Client struct {
 
 	databases  map[string]*utils.Database
 	ddlJobs    []*model.Job
-	backupMeta *backuppb.BackupMeta
+	backupMeta *backup.BackupMeta
 	// TODO Remove this field or replace it with a []*DB,
 	// since https://github.com/pingcap/br/pull/377 needs more DBs to speed up DDL execution.
 	// And for now, we must inject a pool of DBs to `Client.GoCreateTables`, otherwise there would be a race condition.
@@ -84,7 +79,7 @@ type Client struct {
 	restoreStores []uint64
 
 	storage            storage.ExternalStorage
-	backend            *backuppb.StorageBackend
+	backend            *backup.StorageBackend
 	switchModeInterval time.Duration
 	switchCh           chan struct{}
 
@@ -136,9 +131,9 @@ func (rc *Client) SetRateLimit(rateLimit uint64) {
 }
 
 // SetStorage set ExternalStorage for client.
-func (rc *Client) SetStorage(ctx context.Context, backend *backuppb.StorageBackend, opts *storage.ExternalStorageOptions) error {
+func (rc *Client) SetStorage(ctx context.Context, backend *backup.StorageBackend, sendCreds bool) error {
 	var err error
-	rc.storage, err = storage.New(ctx, backend, opts)
+	rc.storage, err = storage.Create(ctx, backend, sendCreds)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -171,23 +166,18 @@ func (rc *Client) Close() {
 }
 
 // InitBackupMeta loads schemas from BackupMeta to initialize RestoreClient.
-func (rc *Client) InitBackupMeta(c context.Context, backupMeta *backuppb.BackupMeta, backend *backuppb.StorageBackend, externalStorage storage.ExternalStorage) error {
+func (rc *Client) InitBackupMeta(backupMeta *backup.BackupMeta, backend *backup.StorageBackend) error {
 	if !backupMeta.IsRawKv {
-		reader := metautil.NewMetaReader(backupMeta, externalStorage)
-		databases, err := utils.LoadBackupTables(c, reader)
+		databases, err := utils.LoadBackupTables(backupMeta)
 		if err != nil {
 			return errors.Trace(err)
 		}
 		rc.databases = databases
 
 		var ddlJobs []*model.Job
-		// ddls is the bytes of json.Marshal
-		ddls, err := reader.ReadDDLs(c)
-		if len(ddls) != 0 {
-			err = json.Unmarshal(ddls, &ddlJobs)
-			if err != nil {
-				return errors.Trace(err)
-			}
+		err = json.Unmarshal(backupMeta.GetDdls(), &ddlJobs)
+		if err != nil {
+			return errors.Trace(err)
 		}
 		rc.ddlJobs = ddlJobs
 	}
@@ -197,7 +187,8 @@ func (rc *Client) InitBackupMeta(c context.Context, backupMeta *backuppb.BackupM
 	metaClient := NewSplitClient(rc.pdClient, rc.tlsConf)
 	importCli := NewImportClient(metaClient, rc.tlsConf, rc.keepaliveConf)
 	rc.fileImporter = NewFileImporter(metaClient, importCli, backend, rc.backupMeta.IsRawKv, rc.rateLimit)
-	return rc.fileImporter.CheckMultiIngestSupport(c, rc.pdClient)
+
+	return nil
 }
 
 // IsRawKvMode checks whether the backup data is in raw kv format, in which case transactional recover is forbidden.
@@ -206,7 +197,7 @@ func (rc *Client) IsRawKvMode() bool {
 }
 
 // GetFilesInRawRange gets all files that are in the given range or intersects with the given range.
-func (rc *Client) GetFilesInRawRange(startKey []byte, endKey []byte, cf string) ([]*backuppb.File, error) {
+func (rc *Client) GetFilesInRawRange(startKey []byte, endKey []byte, cf string) ([]*backup.File, error) {
 	if !rc.IsRawKvMode() {
 		return nil, errors.Annotate(berrors.ErrRestoreModeMismatch, "the backup data is not in raw kv mode")
 	}
@@ -227,14 +218,11 @@ func (rc *Client) GetFilesInRawRange(startKey []byte, endKey []byte, cf string) 
 			utils.CompareEndKey(endKey, rawRange.EndKey) > 0 {
 			// Only partial of the restoring range is in the current backup-ed range. So the given range can't be fully
 			// restored.
-			return nil, errors.Annotatef(berrors.ErrRestoreRangeMismatch,
-				"the given range to restore [%s, %s) is not fully covered by the range that was backed up [%s, %s)",
-				redact.Key(startKey), redact.Key(endKey), redact.Key(rawRange.StartKey), redact.Key(rawRange.EndKey),
-			)
+			return nil, errors.Annotate(berrors.ErrRestoreRangeMismatch, "the given range to restore is not fully covered by the range that was backed up")
 		}
 
 		// We have found the range that contains the given range. Find all necessary files.
-		files := make([]*backuppb.File, 0)
+		files := make([]*backup.File, 0)
 
 		for _, file := range rc.backupMeta.Files {
 			if file.Cf != cf {
@@ -357,11 +345,12 @@ func (rc *Client) CreateDatabase(ctx context.Context, db *model.DBInfo) error {
 // CreateTables creates multiple tables, and returns their rewrite rules.
 func (rc *Client) CreateTables(
 	dom *domain.Domain,
-	tables []*metautil.Table,
+	tables []*utils.Table,
 	newTS uint64,
 ) (*RewriteRules, []*model.TableInfo, error) {
 	rewriteRules := &RewriteRules{
-		Data: make([]*import_sstpb.RewriteRule, 0),
+		Table: make([]*import_sstpb.RewriteRule, 0),
+		Data:  make([]*import_sstpb.RewriteRule, 0),
 	}
 	newTables := make([]*model.TableInfo, 0, len(tables))
 	errCh := make(chan error, 1)
@@ -372,6 +361,7 @@ func (rc *Client) CreateTables(
 	dataCh := rc.GoCreateTables(context.TODO(), dom, tables, newTS, nil, errCh)
 	for et := range dataCh {
 		rules := et.RewriteRule
+		rewriteRules.Table = append(rewriteRules.Table, rules.Table...)
 		rewriteRules.Data = append(rewriteRules.Data, rules.Data...)
 		newTables = append(newTables, et.Table)
 	}
@@ -394,12 +384,15 @@ func (rc *Client) createTable(
 	ctx context.Context,
 	db *DB,
 	dom *domain.Domain,
-	table *metautil.Table,
+	table *utils.Table,
 	newTS uint64,
 ) (CreatedTable, error) {
 	if rc.IsSkipCreateSQL() {
 		log.Info("skip create table and alter autoIncID", zap.Stringer("table", table.Info.Name))
 	} else {
+		// don't use rc.ctx here...
+		// remove the ctx field of Client would be a great work,
+		// we just take a small step here :<
 		err := db.CreateTable(ctx, table)
 		if err != nil {
 			return CreatedTable{}, errors.Trace(err)
@@ -408,13 +401,6 @@ func (rc *Client) createTable(
 	newTableInfo, err := rc.GetTableSchema(dom, table.DB.Name, table.Info.Name)
 	if err != nil {
 		return CreatedTable{}, errors.Trace(err)
-	}
-	if newTableInfo.IsCommonHandle != table.Info.IsCommonHandle {
-		return CreatedTable{}, errors.Annotatef(berrors.ErrRestoreModeMismatch,
-			"Clustered index option mismatch. Restored cluster's @@tidb_enable_clustered_index should be %v (backup table = %v, created table = %v).",
-			transferBoolToValue(table.Info.IsCommonHandle),
-			table.Info.IsCommonHandle,
-			newTableInfo.IsCommonHandle)
 	}
 	rules := GetRewriteRules(newTableInfo, table.Info, newTS)
 	et := CreatedTable{
@@ -431,22 +417,15 @@ func (rc *Client) createTable(
 func (rc *Client) GoCreateTables(
 	ctx context.Context,
 	dom *domain.Domain,
-	tables []*metautil.Table,
+	tables []*utils.Table,
 	newTS uint64,
 	dbPool []*DB,
 	errCh chan<- error,
 ) <-chan CreatedTable {
 	// Could we have a smaller size of tables?
 	log.Info("start create tables")
-
-	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
-		span1 := span.Tracer().StartSpan("Client.GoCreateTables", opentracing.ChildOf(span.Context()))
-		defer span1.Finish()
-		ctx = opentracing.ContextWithSpan(ctx, span1)
-	}
-
 	outCh := make(chan CreatedTable, len(tables))
-	createOneTable := func(c context.Context, db *DB, t *metautil.Table) error {
+	createOneTable := func(c context.Context, db *DB, t *utils.Table) error {
 		select {
 		case <-c.Done():
 			return c.Err()
@@ -484,8 +463,8 @@ func (rc *Client) GoCreateTables(
 }
 
 func (rc *Client) createTablesWithSoleDB(ctx context.Context,
-	createOneTable func(ctx context.Context, db *DB, t *metautil.Table) error,
-	tables []*metautil.Table) error {
+	createOneTable func(ctx context.Context, db *DB, t *utils.Table) error,
+	tables []*utils.Table) error {
 	for _, t := range tables {
 		if err := createOneTable(ctx, rc.db, t); err != nil {
 			return errors.Trace(err)
@@ -495,8 +474,8 @@ func (rc *Client) createTablesWithSoleDB(ctx context.Context,
 }
 
 func (rc *Client) createTablesWithDBPool(ctx context.Context,
-	createOneTable func(ctx context.Context, db *DB, t *metautil.Table) error,
-	tables []*metautil.Table, dbPool []*DB) error {
+	createOneTable func(ctx context.Context, db *DB, t *utils.Table) error,
+	tables []*utils.Table, dbPool []*DB) error {
 	eg, ectx := errgroup.WithContext(ctx)
 	workers := utils.NewWorkerPool(uint(len(dbPool)), "DDL workers")
 	for _, t := range tables {
@@ -546,42 +525,10 @@ func (rc *Client) setSpeedLimit(ctx context.Context) error {
 	return nil
 }
 
-// isFilesBelongToSameRange check whether two files are belong to the same range with different cf.
-func isFilesBelongToSameRange(f1, f2 string) bool {
-	// the backup date file pattern is `{store_id}_{region_id}_{epoch_version}_{key}_{ts}_{cf}.sst`
-	// so we need to compare with out the `_{cf}.sst` suffix
-	idx1 := strings.LastIndex(f1, "_")
-	idx2 := strings.LastIndex(f2, "_")
-
-	if idx1 < 0 || idx2 < 0 {
-		panic(fmt.Sprintf("invalid backup data file name: '%s', '%s'", f1, f2))
-	}
-
-	return f1[:idx1] == f2[:idx2]
-}
-
-func drainFilesByRange(files []*backuppb.File, supportMulti bool) ([]*backuppb.File, []*backuppb.File) {
-	if len(files) == 0 {
-		return nil, nil
-	}
-	if !supportMulti {
-		return files[:1], files[1:]
-	}
-	idx := 1
-	for idx < len(files) {
-		if !isFilesBelongToSameRange(files[idx-1].Name, files[idx].Name) {
-			break
-		}
-		idx++
-	}
-
-	return files[:idx], files[idx:]
-}
-
 // RestoreFiles tries to restore the files.
 func (rc *Client) RestoreFiles(
 	ctx context.Context,
-	files []*backuppb.File,
+	files []*backup.File,
 	rewriteRules *RewriteRules,
 	updateCh glue.Progress,
 ) (err error) {
@@ -596,34 +543,25 @@ func (rc *Client) RestoreFiles(
 
 	log.Debug("start to restore files", zap.Int("files", len(files)))
 
-	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
-		span1 := span.Tracer().StartSpan("Client.RestoreFiles", opentracing.ChildOf(span.Context()))
-		defer span1.Finish()
-		ctx = opentracing.ContextWithSpan(ctx, span1)
-	}
-
 	eg, ectx := errgroup.WithContext(ctx)
 	err = rc.setSpeedLimit(ctx)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	var rangeFiles []*backuppb.File
-	var leftFiles []*backuppb.File
-	for rangeFiles, leftFiles = drainFilesByRange(files, rc.fileImporter.supportMultiIngest); len(rangeFiles) != 0; rangeFiles, leftFiles = drainFilesByRange(leftFiles, rc.fileImporter.supportMultiIngest) {
-		filesReplica := rangeFiles
+	for _, file := range files {
+		fileReplica := file
 		rc.workerPool.ApplyOnErrorGroup(eg,
 			func() error {
 				fileStart := time.Now()
 				defer func() {
-					log.Info("import files done", logutil.Files(filesReplica),
+					log.Info("import file done", logutil.File(fileReplica),
 						zap.Duration("take", time.Since(fileStart)))
 					updateCh.Inc()
 				}()
-				return rc.fileImporter.Import(ectx, filesReplica, rewriteRules)
+				return rc.fileImporter.Import(ectx, fileReplica, rewriteRules)
 			})
 	}
-
 	if err := eg.Wait(); err != nil {
 		summary.CollectFailureUnit("file", err)
 		log.Error(
@@ -637,7 +575,7 @@ func (rc *Client) RestoreFiles(
 
 // RestoreRaw tries to restore raw keys in the specified range.
 func (rc *Client) RestoreRaw(
-	ctx context.Context, startKey []byte, endKey []byte, files []*backuppb.File, updateCh glue.Progress,
+	ctx context.Context, startKey []byte, endKey []byte, files []*backup.File, updateCh glue.Progress,
 ) error {
 	start := time.Now()
 	defer func() {
@@ -661,7 +599,7 @@ func (rc *Client) RestoreRaw(
 		rc.workerPool.ApplyOnErrorGroup(eg,
 			func() error {
 				defer updateCh.Inc()
-				return rc.fileImporter.Import(ectx, []*backuppb.File{fileReplica}, EmptyRewriteRule())
+				return rc.fileImporter.Import(ectx, fileReplica, EmptyRewriteRule())
 			})
 	}
 	if err := eg.Wait(); err != nil {
@@ -733,7 +671,7 @@ func (rc *Client) switchTiKVMode(ctx context.Context, mode import_sstpb.SwitchMo
 			opt = grpc.WithTransportCredentials(credentials.NewTLS(rc.tlsConf))
 		}
 		gctx, cancel := context.WithTimeout(ctx, time.Second*5)
-		connection, err := grpc.DialContext(
+		conn, err := grpc.DialContext(
 			gctx,
 			store.GetAddress(),
 			opt,
@@ -745,14 +683,14 @@ func (rc *Client) switchTiKVMode(ctx context.Context, mode import_sstpb.SwitchMo
 		if err != nil {
 			return errors.Trace(err)
 		}
-		client := import_sstpb.NewImportSSTClient(connection)
+		client := import_sstpb.NewImportSSTClient(conn)
 		_, err = client.SwitchMode(ctx, &import_sstpb.SwitchModeRequest{
 			Mode: mode,
 		})
 		if err != nil {
 			return errors.Trace(err)
 		}
-		err = connection.Close()
+		err = conn.Close()
 		if err != nil {
 			log.Error("close grpc connection failed in switch mode", zap.Error(err))
 			continue
@@ -775,12 +713,16 @@ func (rc *Client) GoValidateChecksum(
 	outCh := make(chan struct{}, 1)
 	workers := utils.NewWorkerPool(defaultChecksumConcurrency, "RestoreChecksum")
 	go func() {
+		start := time.Now()
 		wg, ectx := errgroup.WithContext(ctx)
 		defer func() {
 			log.Info("all checksum ended")
 			if err := wg.Wait(); err != nil {
 				errCh <- err
 			}
+			elapsed := time.Since(start)
+			summary.CollectDuration("restore checksum", elapsed)
+			summary.CollectSuccessUnit("table checksum", 1, elapsed)
 			outCh <- struct{}{}
 			close(outCh)
 		}()
@@ -794,12 +736,6 @@ func (rc *Client) GoValidateChecksum(
 					return
 				}
 				workers.ApplyOnErrorGroup(wg, func() error {
-					start := time.Now()
-					defer func() {
-						elapsed := time.Since(start)
-						summary.CollectDuration("restore checksum", elapsed)
-						summary.CollectSuccessUnit("table checksum", 1, elapsed)
-					}()
 					err := rc.execChecksum(ectx, tbl, kvClient, concurrency)
 					if err != nil {
 						return errors.Trace(err)
@@ -822,12 +758,6 @@ func (rc *Client) execChecksum(ctx context.Context, tbl CreatedTable, kvClient k
 	if tbl.OldTable.NoChecksum() {
 		logger.Warn("table has no checksum, skipping checksum")
 		return nil
-	}
-
-	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
-		span1 := span.Tracer().StartSpan("Client.execChecksum", opentracing.ChildOf(span.Context()))
-		defer span1.Finish()
-		ctx = opentracing.ContextWithSpan(ctx, span1)
 	}
 
 	startTS, err := rc.GetTS(ctx)
@@ -883,11 +813,6 @@ const (
 func (rc *Client) LoadRestoreStores(ctx context.Context) error {
 	if !rc.isOnline {
 		return nil
-	}
-	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
-		span1 := span.Tracer().StartSpan("Client.LoadRestoreStores", opentracing.ChildOf(span.Context()))
-		defer span1.Finish()
-		ctx = opentracing.ContextWithSpan(ctx, span1)
 	}
 
 	stores, err := rc.pdClient.GetAllStores(ctx)
@@ -1046,72 +971,4 @@ func (rc *Client) EnableSkipCreateSQL() {
 // IsSkipCreateSQL returns whether we need skip create schema and tables in restore.
 func (rc *Client) IsSkipCreateSQL() bool {
 	return rc.noSchema
-}
-
-// PreCheckTableTiFlashReplica checks whether TiFlash replica is less than TiFlash node.
-func (rc *Client) PreCheckTableTiFlashReplica(
-	ctx context.Context,
-	tables []*metautil.Table,
-) error {
-	tiFlashStores, err := conn.GetAllTiKVStores(ctx, rc.pdClient, conn.TiFlashOnly)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	tiFlashStoreCount := len(tiFlashStores)
-	for _, table := range tables {
-		if table.Info.TiFlashReplica != nil && table.Info.TiFlashReplica.Count > uint64(tiFlashStoreCount) {
-			// we cannot satisfy TiFlash replica in restore cluster. so we should
-			// set TiFlashReplica to unavailable in tableInfo, to avoid TiDB cannot sense TiFlash and make plan to TiFlash
-			// see details at https://github.com/pingcap/br/issues/931
-			table.Info.TiFlashReplica = nil
-		}
-	}
-	return nil
-}
-
-// PreCheckTableClusterIndex checks whether backup tables and existed tables have different cluster index options。
-func (rc *Client) PreCheckTableClusterIndex(
-	tables []*metautil.Table,
-	ddlJobs []*model.Job,
-	dom *domain.Domain,
-) error {
-	for _, table := range tables {
-		oldTableInfo, err := rc.GetTableSchema(dom, table.DB.Name, table.Info.Name)
-		// table exists in database
-		if err == nil {
-			if table.Info.IsCommonHandle != oldTableInfo.IsCommonHandle {
-				return errors.Annotatef(berrors.ErrRestoreModeMismatch,
-					"Clustered index option mismatch. Restored cluster's @@tidb_enable_clustered_index should be %v (backup table = %v, created table = %v).",
-					transferBoolToValue(table.Info.IsCommonHandle),
-					table.Info.IsCommonHandle,
-					oldTableInfo.IsCommonHandle)
-			}
-		}
-	}
-	for _, job := range ddlJobs {
-		if job.Type == model.ActionCreateTable {
-			tableInfo := job.BinlogInfo.TableInfo
-			if tableInfo != nil {
-				oldTableInfo, err := rc.GetTableSchema(dom, model.NewCIStr(job.SchemaName), tableInfo.Name)
-				// table exists in database
-				if err == nil {
-					if tableInfo.IsCommonHandle != oldTableInfo.IsCommonHandle {
-						return errors.Annotatef(berrors.ErrRestoreModeMismatch,
-							"Clustered index option mismatch. Restored cluster's @@tidb_enable_clustered_index should be %v (backup table = %v, created table = %v).",
-							transferBoolToValue(tableInfo.IsCommonHandle),
-							tableInfo.IsCommonHandle,
-							oldTableInfo.IsCommonHandle)
-					}
-				}
-			}
-		}
-	}
-	return nil
-}
-
-func transferBoolToValue(enable bool) string {
-	if enable {
-		return "ON"
-	}
-	return "OFF"
 }

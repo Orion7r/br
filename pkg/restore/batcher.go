@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/opentracing/opentracing-go"
-	backuppb "github.com/pingcap/kvproto/pkg/backup"
+	"github.com/pingcap/kvproto/pkg/backup"
+
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 
@@ -224,8 +224,8 @@ type DrainResult struct {
 }
 
 // Files returns all files of this drain result.
-func (result DrainResult) Files() []*backuppb.File {
-	files := make([]*backuppb.File, 0, len(result.Ranges)*2)
+func (result DrainResult) Files() []*backup.File {
+	files := make([]*backup.File, 0, len(result.Ranges)*2)
 	for _, fs := range result.Ranges {
 		files = append(files, fs.Files...)
 	}
@@ -314,12 +314,6 @@ func (b *Batcher) drainRanges() DrainResult {
 // Send sends all pending requests in the batcher.
 // returns tables sent FULLY in the current batch.
 func (b *Batcher) Send(ctx context.Context) {
-	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
-		span1 := span.Tracer().StartSpan("Batcher.Send", opentracing.ChildOf(span.Context()))
-		defer span1.Finish()
-		ctx = opentracing.ContextWithSpan(ctx, span1)
-	}
-
 	drainResult := b.drainRanges()
 	tbs := drainResult.TablesToSend
 	ranges := drainResult.Ranges

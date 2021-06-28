@@ -21,24 +21,9 @@ error = '''
 backup no leader
 '''
 
-["BR:Common:ErrFailedToConnect"]
-error = '''
-failed to make gRPC channels
-'''
-
 ["BR:Common:ErrInvalidArgument"]
 error = '''
 invalid argument
-'''
-
-["BR:Common:ErrInvalidMetaFile"]
-error = '''
-invalid metafile
-'''
-
-["BR:Common:ErrUndefinedDbOrTable"]
-error = '''
-undefined restore databases or tables
 '''
 
 ["BR:Common:ErrUnknown"]
@@ -54,11 +39,6 @@ version mismatch
 ["BR:ExternalStorage:ErrStorageInvalidConfig"]
 error = '''
 invalid external storage config
-'''
-
-["BR:ExternalStorage:ErrStorageInvalidPermission"]
-error = '''
-external storage permission
 '''
 
 ["BR:ExternalStorage:ErrStorageUnknown"]
@@ -91,6 +71,11 @@ error = '''
 key not in region
 '''
 
+["BR:KV:ErrKVNotHealth"]
+error = '''
+tikv cluster not health
+'''
+
 ["BR:KV:ErrKVNotLeader"]
 error = '''
 not leader
@@ -106,19 +91,9 @@ error = '''
 rewrite rule not found
 '''
 
-["BR:KV:ErrKVStorage"]
-error = '''
-tikv storage occur I/O error
-'''
-
 ["BR:KV:ErrKVUnknown"]
 error = '''
-unknown error occur on tikv
-'''
-
-["BR:KV:ErrNotTiKVStorage"]
-error = '''
-storage is not tikv
+unknown tikv error
 '''
 
 ["BR:PD:ErrPDInvalidResponse"]
@@ -204,10 +179,5 @@ restore table ID mismatch
 ["BR:Restore:ErrRestoreWriteAndIngest"]
 error = '''
 failed to write and ingest
-'''
-
-["BR:Restore:ErrUnsupportedSysTable"]
-error = '''
-the system table isn't supported for restoring yet
 '''
 

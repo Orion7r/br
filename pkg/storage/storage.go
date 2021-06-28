@@ -8,25 +8,9 @@ import (
 	"net/http"
 
 	"github.com/pingcap/errors"
-	backuppb "github.com/pingcap/kvproto/pkg/backup"
+	"github.com/pingcap/kvproto/pkg/backup"
 
 	berrors "github.com/pingcap/br/pkg/errors"
-)
-
-// Permission represents the permission we need to check in create storage.
-type Permission string
-
-const (
-	// AccessBuckets represents bucket access permission
-	// it replace the origin skip-check-path.
-	AccessBuckets Permission = "AccessBucket"
-
-	// ListObjects represents listObjects permission
-	ListObjects Permission = "ListObjects"
-	// GetObject represents GetObject permission
-	GetObject Permission = "GetObject"
-	// PutObject represents PutObject permission
-	PutObject Permission = "PutObject"
 )
 
 // WalkOption is the option of storage.WalkDir.
@@ -72,14 +56,14 @@ type Writer interface {
 
 // ExternalStorage represents a kind of file system storage.
 type ExternalStorage interface {
-	// WriteFile writes a complete file to storage, similar to ioutil.WriteFile
-	WriteFile(ctx context.Context, name string, data []byte) error
-	// ReadFile reads a complete file from storage, similar to ioutil.ReadFile
-	ReadFile(ctx context.Context, name string) ([]byte, error)
+	// Write file to storage
+	Write(ctx context.Context, name string, data []byte) error
+	// Read storage file
+	Read(ctx context.Context, name string) ([]byte, error)
 	// FileExists return true if file exists
 	FileExists(ctx context.Context, name string) (bool, error)
 	// Open a Reader by file path. path is relative path to storage base path
-	Open(ctx context.Context, path string) (ExternalFileReader, error)
+	Open(ctx context.Context, path string) (ReadSeekCloser, error)
 	// WalkDir traverse all the files in a dir.
 	//
 	// fn is the function called for each regular file visited by WalkDir.
@@ -91,22 +75,10 @@ type ExternalStorage interface {
 	// URI returns the base path as a URI
 	URI() string
 
-	// Create opens a file writer by path. path is relative path to storage base path
-	Create(ctx context.Context, path string) (ExternalFileWriter, error)
-}
-
-// ExternalFileReader represents the streaming external file reader.
-type ExternalFileReader interface {
-	io.ReadCloser
-	io.Seeker
-}
-
-// ExternalFileWriter represents the streaming external file writer.
-type ExternalFileWriter interface {
-	// Write writes to buffer and if chunk is filled will upload it
-	Write(ctx context.Context, p []byte) (int, error)
-	// Close writes final chunk and completes the upload
-	Close(ctx context.Context) error
+	// CreateUploader create a uploader that will upload chunks data to storage.
+	// It's design for s3 multi-part upload currently. e.g. cdc log backup use this to do multi part upload
+	// to avoid generate small fragment files.
+	CreateUploader(ctx context.Context, name string) (Uploader, error)
 }
 
 // ExternalStorageOptions are backend-independent options provided to New.
@@ -117,9 +89,6 @@ type ExternalStorageOptions struct {
 	// downstream via external key managers, e.g. on K8s or cloud provider.
 	SendCredentials bool
 
-	// NoCredentials means that no cloud credentials are supplied to BR
-	NoCredentials bool
-
 	// SkipCheckPath marks whether to skip checking path's existence.
 	//
 	// This should only be set to true in testing, to avoid interacting with the
@@ -128,23 +97,17 @@ type ExternalStorageOptions struct {
 	// function will ensure the path referred by the backend exists by
 	// recursively creating the folders. This will also throw an error if such
 	// operation is impossible (e.g. when the bucket storing the path is missing).
-
-	// deprecated: use checkPermissions and specify the checkPermission instead.
 	SkipCheckPath bool
 
 	// HTTPClient to use. The created storage may ignore this field if it is not
 	// directly using HTTP (e.g. the local storage).
 	HTTPClient *http.Client
-
-	// CheckPermissions check the given permission in New() function.
-	// make sure we can access the storage correctly before execute tasks.
-	CheckPermissions []Permission
 }
 
 // Create creates ExternalStorage.
 //
 // Please consider using `New` in the future.
-func Create(ctx context.Context, backend *backuppb.StorageBackend, sendCreds bool) (ExternalStorage, error) {
+func Create(ctx context.Context, backend *backup.StorageBackend, sendCreds bool) (ExternalStorage, error) {
 	return New(ctx, backend, &ExternalStorageOptions{
 		SendCredentials: sendCreds,
 		SkipCheckPath:   false,
@@ -153,21 +116,24 @@ func Create(ctx context.Context, backend *backuppb.StorageBackend, sendCreds boo
 }
 
 // New creates an ExternalStorage with options.
-func New(ctx context.Context, backend *backuppb.StorageBackend, opts *ExternalStorageOptions) (ExternalStorage, error) {
+func New(ctx context.Context, backend *backup.StorageBackend, opts *ExternalStorageOptions) (ExternalStorage, error) {
 	switch backend := backend.Backend.(type) {
-	case *backuppb.StorageBackend_Local:
+	case *backup.StorageBackend_Local:
 		if backend.Local == nil {
 			return nil, errors.Annotate(berrors.ErrStorageInvalidConfig, "local config not found")
 		}
+		if opts.SkipCheckPath {
+			return &LocalStorage{base: backend.Local.Path}, nil
+		}
 		return NewLocalStorage(backend.Local.Path)
-	case *backuppb.StorageBackend_S3:
+	case *backup.StorageBackend_S3:
 		if backend.S3 == nil {
 			return nil, errors.Annotate(berrors.ErrStorageInvalidConfig, "s3 config not found")
 		}
 		return newS3Storage(backend.S3, opts)
-	case *backuppb.StorageBackend_Noop:
+	case *backup.StorageBackend_Noop:
 		return newNoopStorage(), nil
-	case *backuppb.StorageBackend_Gcs:
+	case *backup.StorageBackend_Gcs:
 		if backend.Gcs == nil {
 			return nil, errors.Annotate(berrors.ErrStorageInvalidConfig, "GCS config not found")
 		}

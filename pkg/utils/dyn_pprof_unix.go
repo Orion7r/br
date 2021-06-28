@@ -8,27 +8,25 @@ import (
 	"os/signal"
 	"syscall"
 
-	tidbutils "github.com/pingcap/tidb-tools/pkg/utils"
-
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 )
 
 const startPProfSignal = syscall.SIGUSR1
 
+var signalChan = make(chan os.Signal, 1)
+
 // StartDynamicPProfListener starts the listener that will enable pprof when received `startPProfSignal`.
-func StartDynamicPProfListener(tls *tidbutils.TLS) {
-	signalChan := make(chan os.Signal, 1)
+func StartDynamicPProfListener() {
 	signal.Notify(signalChan, startPProfSignal)
-	go func() {
-		for sig := range signalChan {
-			if sig == startPProfSignal {
-				log.Info("signal received, starting pprof...", zap.Stringer("signal", sig))
-				if err := StartPProfListener("0.0.0.0:0", tls); err != nil {
-					log.Warn("failed to start pprof", zap.Error(err))
-					return
-				}
-			}
+	go onSignalStartPProf(signalChan)
+}
+
+func onSignalStartPProf(signals <-chan os.Signal) {
+	for sig := range signals {
+		if sig == startPProfSignal {
+			log.Info("signal received, starting pprof...", zap.Stringer("signal", sig))
+			StartPProfListener("0.0.0.0:0")
 		}
-	}()
+	}
 }

@@ -5,7 +5,7 @@ package glue
 import (
 	"context"
 
-	"github.com/pingcap/parser/model"
+	"github.com/DigitalChinaOpenSource/DCParser/model"
 	"github.com/pingcap/tidb/domain"
 	"github.com/pingcap/tidb/kv"
 	pd "github.com/tikv/pd/client"
@@ -25,9 +25,6 @@ type Glue interface {
 
 	// Record records some information useful for log-less summary.
 	Record(name string, value uint64)
-
-	// GetVersion gets BR package version to run backup/restore job
-	GetVersion() string
 }
 
 // Session is an abstraction of the session.Session interface.

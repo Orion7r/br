@@ -25,7 +25,7 @@ row_count_ori=$(run_sql "SELECT COUNT(*) FROM $DB.$TABLE;" | awk '/COUNT/{print 
 
 # add shuffle region scheduler
 echo "add shuffle-region-scheduler"
-run_pd_ctl -u https://$PD_ADDR sched add shuffle-region-scheduler
+echo "-u $PD_ADDR -d sched add shuffle-region-scheduler" | pd-ctl
 
 # backup with shuffle region
 echo "backup start..."
@@ -38,13 +38,15 @@ echo "restore start..."
 run_br restore table --db $DB --table $TABLE -s "local://$TEST_DIR/$DB" --pd $PD_ADDR
 
 # remove shuffle region scheduler
-run_pd_ctl -u https://$PD_ADDR sched remove shuffle-region-scheduler
+echo "-u $PD_ADDR -d sched remove shuffle-region-scheduler" | pd-ctl
 
 row_count_new=$(run_sql "SELECT COUNT(*) FROM $DB.$TABLE;" | awk '/COUNT/{print $2}')
 
 echo "[original] row count: $row_count_ori, [after br] row count: $row_count_new"
 
-if [ "$row_count_ori" -ne "$row_count_new" ];then
+if [ "$row_count_ori" -eq "$row_count_new" ];then
+    echo "TEST: [$TEST_NAME] successed!"
+else
     echo "TEST: [$TEST_NAME] failed!"
     exit 1
 fi

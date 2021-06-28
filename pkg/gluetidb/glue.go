@@ -8,8 +8,8 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pingcap/parser/model"
-	"github.com/pingcap/parser/mysql"
+	"github.com/DigitalChinaOpenSource/DCParser/model"
+	"github.com/DigitalChinaOpenSource/DCParser/mysql"
 	"github.com/pingcap/tidb/config"
 	"github.com/pingcap/tidb/ddl"
 	"github.com/pingcap/tidb/domain"
@@ -33,9 +33,10 @@ const (
 // New makes a new tidb glue.
 func New() Glue {
 	log.Debug("enabling no register config")
-	config.UpdateGlobal(func(conf *config.Config) {
-		conf.SkipRegisterToDashboard = true
-	})
+	// TODO use config.UpdateGlobalConfig here if TiDB merge it to 4.0
+	conf := *config.GetGlobalConfig()
+	conf.SkipRegisterToDashboard = true
+	config.StoreGlobalConfig(&conf)
 	return Glue{}
 }
 
@@ -98,14 +99,8 @@ func (g Glue) Record(name string, value uint64) {
 	g.tikvGlue.Record(name, value)
 }
 
-// GetVersion implements glue.Glue.
-func (g Glue) GetVersion() string {
-	return g.tikvGlue.GetVersion()
-}
-
-// Execute implements glue.Session.
 func (gs *tidbSession) Execute(ctx context.Context, sql string) error {
-	_, err := gs.se.ExecuteInternal(ctx, sql)
+	_, err := gs.se.Execute(ctx, sql)
 	return errors.Trace(err)
 }
 

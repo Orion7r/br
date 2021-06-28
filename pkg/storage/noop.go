@@ -8,13 +8,13 @@ import (
 
 type noopStorage struct{}
 
-// WriteFile file to storage.
-func (*noopStorage) WriteFile(ctx context.Context, name string, data []byte) error {
+// Write file to storage.
+func (*noopStorage) Write(ctx context.Context, name string, data []byte) error {
 	return nil
 }
 
-// ReadFile storage file.
-func (*noopStorage) ReadFile(ctx context.Context, name string) ([]byte, error) {
+// Read storage file.
+func (*noopStorage) Read(ctx context.Context, name string) ([]byte, error) {
 	return []byte{}, nil
 }
 
@@ -24,7 +24,7 @@ func (*noopStorage) FileExists(ctx context.Context, name string) (bool, error) {
 }
 
 // Open a Reader by file path.
-func (*noopStorage) Open(ctx context.Context, path string) (ExternalFileReader, error) {
+func (*noopStorage) Open(ctx context.Context, path string) (ReadSeekCloser, error) {
 	return noopReader{}, nil
 }
 
@@ -37,9 +37,9 @@ func (s *noopStorage) URI() string {
 	return "noop:///"
 }
 
-// Create implements ExternalStorage interface.
-func (*noopStorage) Create(ctx context.Context, name string) (ExternalFileWriter, error) {
-	return &noopWriter{}, nil
+// CreateUploader implenments ExternalStorage interface.
+func (*noopStorage) CreateUploader(ctx context.Context, name string) (Uploader, error) {
+	panic("noop storage not support multi-upload")
 }
 
 func newNoopStorage() *noopStorage {
@@ -49,7 +49,7 @@ func newNoopStorage() *noopStorage {
 type noopReader struct{}
 
 func (noopReader) Read(p []byte) (n int, err error) {
-	return len(p), nil
+	return 0, nil
 }
 
 func (noopReader) Close() error {
@@ -57,15 +57,5 @@ func (noopReader) Close() error {
 }
 
 func (noopReader) Seek(offset int64, whence int) (int64, error) {
-	return offset, nil
-}
-
-type noopWriter struct{}
-
-func (noopWriter) Write(ctx context.Context, p []byte) (int, error) {
-	return len(p), nil
-}
-
-func (noopWriter) Close(ctx context.Context) error {
-	return nil
+	return 0, nil
 }

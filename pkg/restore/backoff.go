@@ -21,8 +21,8 @@ const (
 	importSSTMaxWaitInterval = 1 * time.Second
 
 	downloadSSTRetryTimes      = 8
-	downloadSSTWaitInterval    = 1 * time.Second
-	downloadSSTMaxWaitInterval = 4 * time.Second
+	downloadSSTWaitInterval    = 10 * time.Millisecond
+	downloadSSTMaxWaitInterval = 1 * time.Second
 
 	resetTSRetryTime       = 16
 	resetTSWaitInterval    = 50 * time.Millisecond
@@ -53,29 +53,24 @@ func newDownloadSSTBackoffer() utils.Backoffer {
 }
 
 func (bo *importerBackoffer) NextBackoff(err error) time.Duration {
-	if utils.MessageIsRetryableStorageError(err.Error()) {
+	switch errors.Cause(err) { // nolint:errorlint
+	case berrors.ErrKVEpochNotMatch, berrors.ErrKVDownloadFailed, berrors.ErrKVIngestFailed:
 		bo.delayTime = 2 * bo.delayTime
 		bo.attempt--
-	} else {
-		switch errors.Cause(err) { // nolint:errorlint
-		case berrors.ErrKVEpochNotMatch, berrors.ErrKVDownloadFailed, berrors.ErrKVIngestFailed:
+	case berrors.ErrKVRangeIsEmpty, berrors.ErrKVRewriteRuleNotFound:
+		// Excepted error, finish the operation
+		bo.delayTime = 0
+		bo.attempt = 0
+	default:
+		switch status.Code(err) {
+		case codes.Unavailable, codes.Aborted:
 			bo.delayTime = 2 * bo.delayTime
 			bo.attempt--
-		case berrors.ErrKVRangeIsEmpty, berrors.ErrKVRewriteRuleNotFound:
-			// Excepted error, finish the operation
+		default:
+			// Unexcepted error
 			bo.delayTime = 0
 			bo.attempt = 0
-		default:
-			switch status.Code(err) {
-			case codes.Unavailable, codes.Aborted:
-				bo.delayTime = 2 * bo.delayTime
-				bo.attempt--
-			default:
-				// Unexcepted error
-				bo.delayTime = 0
-				bo.attempt = 0
-				log.Warn("unexcepted error, stop to retry", zap.Error(err))
-			}
+			log.Warn("unexcepted error, stop to retry", zap.Error(err))
 		}
 	}
 	if bo.delayTime > bo.maxDelayTime {

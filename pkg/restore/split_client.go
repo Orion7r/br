@@ -31,7 +31,6 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	berrors "github.com/pingcap/br/pkg/errors"
-	"github.com/pingcap/br/pkg/httputil"
 	"github.com/pingcap/br/pkg/logutil"
 )
 
@@ -382,15 +381,16 @@ func (c *pdClient) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetO
 }
 
 func (c *pdClient) ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*RegionInfo, error) {
-	regions, err := c.client.ScanRegions(ctx, key, endKey, limit)
+	regions, leaders, err := c.client.ScanRegions(ctx, key, endKey, limit)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 	regionInfos := make([]*RegionInfo, 0, len(regions))
-	for _, region := range regions {
+
+	for i := range regions {
 		regionInfos = append(regionInfos, &RegionInfo{
-			Region: region.Meta,
-			Leader: region.Leader,
+			Region: regions[i],
+			Leader: leaders[i],
 		})
 	}
 	return regionInfos, nil
@@ -402,11 +402,8 @@ func (c *pdClient) GetPlacementRule(ctx context.Context, groupID, ruleID string)
 	if addr == "" {
 		return rule, errors.Annotate(berrors.ErrRestoreSplitFailed, "failed to add stores labels: no leader")
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", addr+path.Join("/pd/api/v1/config/rule", groupID, ruleID), nil)
-	if err != nil {
-		return rule, errors.Trace(err)
-	}
-	res, err := httputil.NewClient(c.tlsConf).Do(req)
+	req, _ := http.NewRequestWithContext(ctx, "GET", addr+path.Join("/pd/api/v1/config/rule", groupID, ruleID), nil)
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return rule, errors.Trace(err)
 	}
@@ -428,11 +425,8 @@ func (c *pdClient) SetPlacementRule(ctx context.Context, rule placement.Rule) er
 		return errors.Annotate(berrors.ErrPDLeaderNotFound, "failed to add stores labels")
 	}
 	m, _ := json.Marshal(rule)
-	req, err := http.NewRequestWithContext(ctx, "POST", addr+path.Join("/pd/api/v1/config/rule"), bytes.NewReader(m))
-	if err != nil {
-		return errors.Trace(err)
-	}
-	res, err := httputil.NewClient(c.tlsConf).Do(req)
+	req, _ := http.NewRequestWithContext(ctx, "POST", addr+path.Join("/pd/api/v1/config/rule"), bytes.NewReader(m))
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -444,11 +438,8 @@ func (c *pdClient) DeletePlacementRule(ctx context.Context, groupID, ruleID stri
 	if addr == "" {
 		return errors.Annotate(berrors.ErrPDLeaderNotFound, "failed to add stores labels")
 	}
-	req, err := http.NewRequestWithContext(ctx, "DELETE", addr+path.Join("/pd/api/v1/config/rule", groupID, ruleID), nil)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	res, err := httputil.NewClient(c.tlsConf).Do(req)
+	req, _ := http.NewRequestWithContext(ctx, "DELETE", addr+path.Join("/pd/api/v1/config/rule", groupID, ruleID), nil)
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -463,17 +454,13 @@ func (c *pdClient) SetStoresLabel(
 	if addr == "" {
 		return errors.Annotate(berrors.ErrPDLeaderNotFound, "failed to add stores labels")
 	}
-	httpCli := httputil.NewClient(c.tlsConf)
 	for _, id := range stores {
-		req, err := http.NewRequestWithContext(
+		req, _ := http.NewRequestWithContext(
 			ctx, "POST",
 			addr+path.Join("/pd/api/v1/store", strconv.FormatUint(id, 10), "label"),
 			bytes.NewReader(b),
 		)
-		if err != nil {
-			return errors.Trace(err)
-		}
-		res, err := httpCli.Do(req)
+		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -491,10 +478,4 @@ func (c *pdClient) getPDAPIAddr() string {
 		addr = "http://" + addr
 	}
 	return strings.TrimRight(addr, "/")
-}
-
-func checkRegionEpoch(new, old *RegionInfo) bool {
-	return new.Region.GetId() == old.Region.GetId() &&
-		new.Region.GetRegionEpoch().GetVersion() == old.Region.GetRegionEpoch().GetVersion() &&
-		new.Region.GetRegionEpoch().GetConfVer() == old.Region.GetRegionEpoch().GetConfVer()
 }

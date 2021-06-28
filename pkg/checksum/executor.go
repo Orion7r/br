@@ -5,12 +5,10 @@ package checksum
 import (
 	"context"
 
-	"github.com/pingcap/br/pkg/metautil"
-
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pingcap/parser/model"
+	"github.com/DigitalChinaOpenSource/DCParser/model"
 	"github.com/pingcap/tidb/distsql"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/sessionctx/variable"
@@ -18,6 +16,8 @@ import (
 	"github.com/pingcap/tidb/util/ranger"
 	"github.com/pingcap/tipb/go-tipb"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/br/pkg/utils"
 )
 
 // ExecutorBuilder is used to build a "kv.Request".
@@ -25,7 +25,7 @@ type ExecutorBuilder struct {
 	table *model.TableInfo
 	ts    uint64
 
-	oldTable *metautil.Table
+	oldTable *utils.Table
 
 	concurrency uint
 }
@@ -41,7 +41,7 @@ func NewExecutorBuilder(table *model.TableInfo, ts uint64) *ExecutorBuilder {
 }
 
 // SetOldTable set a old table info to the builder.
-func (builder *ExecutorBuilder) SetOldTable(oldTable *metautil.Table) *ExecutorBuilder {
+func (builder *ExecutorBuilder) SetOldTable(oldTable *utils.Table) *ExecutorBuilder {
 	builder.oldTable = oldTable
 	return builder
 }
@@ -63,7 +63,7 @@ func (builder *ExecutorBuilder) Build() (*Executor, error) {
 
 func buildChecksumRequest(
 	newTable *model.TableInfo,
-	oldTable *metautil.Table,
+	oldTable *utils.Table,
 	startTS uint64,
 	concurrency uint,
 ) ([]*kv.Request, error) {
@@ -105,13 +105,13 @@ func buildChecksumRequest(
 func buildRequest(
 	tableInfo *model.TableInfo,
 	tableID int64,
-	oldTable *metautil.Table,
+	oldTable *utils.Table,
 	oldTableID int64,
 	startTS uint64,
 	concurrency uint,
 ) ([]*kv.Request, error) {
 	reqs := make([]*kv.Request, 0)
-	req, err := buildTableRequest(tableInfo, tableID, oldTable, oldTableID, startTS, concurrency)
+	req, err := buildTableRequest(tableID, oldTable, oldTableID, startTS, concurrency)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -151,9 +151,8 @@ func buildRequest(
 }
 
 func buildTableRequest(
-	tableInfo *model.TableInfo,
 	tableID int64,
-	oldTable *metautil.Table,
+	oldTable *utils.Table,
 	oldTableID int64,
 	startTS uint64,
 	concurrency uint,
@@ -172,17 +171,12 @@ func buildTableRequest(
 		Rule:      rule,
 	}
 
-	var ranges []*ranger.Range
-	if tableInfo.IsCommonHandle {
-		ranges = ranger.FullNotNullRange()
-	} else {
-		ranges = ranger.FullIntRange(false)
-	}
+	ranges := ranger.FullIntRange(false)
 
 	var builder distsql.RequestBuilder
 	// Use low priority to reducing impact to other requests.
 	builder.Request.Priority = kv.PriorityLow
-	return builder.SetHandleRanges(nil, tableID, tableInfo.IsCommonHandle, ranges, nil).
+	return builder.SetTableRanges(tableID, ranges, nil).
 		SetStartTS(startTS).
 		SetChecksumRequest(checksum).
 		SetConcurrency(int(concurrency)).
@@ -229,6 +223,7 @@ func sendChecksumRequest(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+	res.Fetch(ctx)
 	defer func() {
 		if err1 := res.Close(); err1 != nil {
 			err = err1

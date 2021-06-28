@@ -22,9 +22,8 @@ import (
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/server"
 	"github.com/pingcap/tidb/session"
-	"github.com/pingcap/tidb/store/mockstore"
-	"github.com/tikv/client-go/v2/mockstore/cluster"
-	"github.com/tikv/client-go/v2/tikv"
+	"github.com/pingcap/tidb/store/mockstore/mocktikv"
+	"github.com/pingcap/tidb/store/tikv"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/tempurl"
 	"go.uber.org/zap"
@@ -35,7 +34,8 @@ var pprofOnce sync.Once
 // Cluster is mock tidb cluster, includes tikv and pd.
 type Cluster struct {
 	*server.Server
-	cluster.Cluster
+	*mocktikv.Cluster
+	mocktikv.MVCCStore
 	kv.Storage
 	*server.TiDBDriver
 	*domain.Domain
@@ -57,13 +57,13 @@ func NewCluster() (*Cluster, error) {
 		}()
 	})
 
-	var mockCluster cluster.Cluster
-	storage, err := mockstore.NewMockStore(
-		mockstore.WithClusterInspector(func(c cluster.Cluster) {
-			mockstore.BootstrapWithSingleStore(c)
-			mockCluster = c
-		}),
-	)
+	cluster := mocktikv.NewCluster()
+	client, pdClient, err := mocktikv.NewTiKVAndPDClient(cluster, nil, "")
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	mocktikv.BootstrapWithSingleStore(cluster)
+	storage, err := tikv.NewTestTiKVStore(client, pdClient, nil, nil, 0)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -74,10 +74,11 @@ func NewCluster() (*Cluster, error) {
 		return nil, errors.Trace(err)
 	}
 	return &Cluster{
-		Storage:  storage,
-		Cluster:  mockCluster,
-		Domain:   dom,
-		PDClient: storage.(tikv.Storage).GetRegionCache().PDClient(),
+		Cluster:   cluster,
+		MVCCStore: client.MvccStore,
+		Storage:   storage,
+		Domain:    dom,
+		PDClient:  pdClient,
 	}, nil
 }
 

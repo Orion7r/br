@@ -30,30 +30,34 @@ export S3_ENDPOINT=127.0.0.1:24928
 rm -rf "$TEST_DIR/$DB"
 mkdir -p "$TEST_DIR/$DB"
 bin/minio server --address $S3_ENDPOINT "$TEST_DIR/$DB" &
+MINIO_PID=$!
 i=0
-while ! curl -o /dev/null -s "http://$S3_ENDPOINT/"; do
+while ! curl -o /dev/null -v -s "http://$S3_ENDPOINT/"; do
     i=$(($i+1))
-    if [ $i -gt 30 ]; then
+    if [ $i -gt 7 ]; then
         echo 'Failed to start minio'
         exit 1
     fi
     sleep 2
 done
 
-bin/mc config --config-dir "$TEST_DIR/$TEST_NAME" \
-    host add minio http://$S3_ENDPOINT $MINIO_ACCESS_KEY $MINIO_SECRET_KEY
-bin/mc mb --config-dir "$TEST_DIR/$TEST_NAME" minio/$BUCKET
+
+s3cmd --access_key=$MINIO_ACCESS_KEY --secret_key=$MINIO_SECRET_KEY --host=$S3_ENDPOINT --host-bucket=$S3_ENDPOINT --no-ssl mb s3://$BUCKET
 
 # Start cdc servers
-run_cdc server --pd=https://$PD_ADDR --log-file=ticdc.log --addr=0.0.0.0:18301 --advertise-addr=127.0.0.1:18301 &
+bin/cdc server --pd=http://$PD_ADDR --log-file=ticdc.log --addr=0.0.0.0:18301 --advertise-addr=127.0.0.1:18301 &
+CDC_PID=$!
+stop_tmp_server() {
+    kill -2 $MINIO_PID
+    kill -2 $CDC_PID
+}
+trap stop_tmp_server EXIT
 
-# TODO: remove this after TiCDC supports TiDB clustered index
-run_sql "set @@global.tidb_enable_clustered_index=0"
 # TiDB global variables cache 2 seconds
 sleep 2
 
 # create change feed for s3 log
-run_cdc cli changefeed create --pd=https://$PD_ADDR --sink-uri="s3://$BUCKET/$DB?endpoint=http://$S3_ENDPOINT" --changefeed-id="simple-replication-task"
+bin/cdc cli changefeed create --pd=http://$PD_ADDR --sink-uri="s3://$BUCKET/$DB?endpoint=http://$S3_ENDPOINT" --changefeed-id="simple-replication-task"
 
 start_ts=$(run_sql "show master status;" | grep Position | awk -F ':' '{print $2}' | xargs)
 
@@ -96,7 +100,7 @@ run_sql "insert into ${DB}_DDL2.t2 values (5, 'x');"
 sleep 80
 
 # remove the change feed, because we don't want to record the drop ddl.
-echo "Y" | run_cdc cli unsafe reset --pd=https://$PD_ADDR
+echo "Y" | bin/cdc cli unsafe reset --pd=http://$PD_ADDR
 
 for i in $(seq $DB_COUNT); do
     run_sql "DROP DATABASE $DB${i};"
@@ -105,7 +109,6 @@ run_sql "DROP DATABASE ${DB}_DDL1"
 run_sql "DROP DATABASE ${DB}_DDL2"
 
 # restore full
-export GO_FAILPOINTS='github.com/pingcap/br/pkg/lightning/backend/local/FailIngestMeta=return("notleader")'
 echo "restore start..."
 run_br restore cdclog -s "s3://$BUCKET/$DB" --pd $PD_ADDR --s3.endpoint="http://$S3_ENDPOINT" \
     --log-file "restore.log" --log-level "info" --start-ts $start_ts --end-ts $end_ts
@@ -129,7 +132,6 @@ if [ "$row_count" -ne "0" ]; then
     echo "TEST: [$TEST_NAME] fail on ts range test."
 fi
 
-export GO_FAILPOINTS='github.com/pingcap/br/pkg/lightning/backend/local/FailIngestMeta=return("epochnotmatch")'
 echo "restore again to restore a=5 record..."
 run_br restore cdclog -s "s3://$BUCKET/$DB" --pd $PD_ADDR --s3.endpoint="http://$S3_ENDPOINT" \
     --log-file "restore.log" --log-level "info" --start-ts $end_ts
@@ -140,14 +142,6 @@ if [ "$row_count" -ne "1" ]; then
     fail=true
     echo "TEST: [$TEST_NAME] fail on recover ts range test."
 fi
-
-# record a=3 should be deleted
-row_count=$(run_sql "SELECT COUNT(*) FROM ${DB}_DDL2.t2 WHERE a=3;" | awk '/COUNT/{print $2}')
-if [ "$row_count" -ne "0" ]; then
-    fail=true
-    echo "TEST: [$TEST_NAME] fail on key not deleted."
-fi
-
 
 for i in $(seq $DB_COUNT); do
     if [ "${row_count_ori[i]}" != "${row_count_new[i]}" ];then
@@ -160,6 +154,8 @@ done
 if $fail; then
     echo "TEST: [$TEST_NAME] failed!"
     exit 1
+else
+    echo "TEST: [$TEST_NAME] successed!"
 fi
 
 for i in $(seq $DB_COUNT); do

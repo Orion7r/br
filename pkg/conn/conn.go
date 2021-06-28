@@ -5,17 +5,16 @@ package conn
 import (
 	"context"
 	"crypto/tls"
-	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/backup"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/tidb/domain"
-	"github.com/pingcap/tidb/kv"
-	"github.com/tikv/client-go/v2/tikv"
+	"github.com/pingcap/tidb/store/tikv"
 	pd "github.com/tikv/pd/client"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -23,14 +22,11 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
-	backuppb "github.com/pingcap/kvproto/pkg/backup"
-	"github.com/pingcap/kvproto/pkg/metapb"
-
 	berrors "github.com/pingcap/br/pkg/errors"
 	"github.com/pingcap/br/pkg/glue"
 	"github.com/pingcap/br/pkg/logutil"
 	"github.com/pingcap/br/pkg/pdutil"
-	"github.com/pingcap/br/pkg/version"
+	"github.com/pingcap/br/pkg/utils"
 )
 
 const (
@@ -39,72 +35,13 @@ const (
 	resetRetryTimes = 3
 )
 
-// Pool is a lazy pool of gRPC channels.
-// When `Get` called, it lazily allocates new connection if connection not full.
-// If it's full, then it will return allocated channels round-robin.
-type Pool struct {
-	mu sync.Mutex
-
-	conns   []*grpc.ClientConn
-	next    int
-	cap     int
-	newConn func(ctx context.Context) (*grpc.ClientConn, error)
-}
-
-func (p *Pool) takeConns() (conns []*grpc.ClientConn) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.conns, conns = nil, p.conns
-	p.next = 0
-	return conns
-}
-
-// Close closes the conn pool.
-func (p *Pool) Close() {
-	for _, c := range p.takeConns() {
-		if err := c.Close(); err != nil {
-			log.Warn("failed to close clientConn", zap.String("target", c.Target()), zap.Error(err))
-		}
-	}
-}
-
-// Get tries to get an existing connection from the pool, or make a new one if the pool not full.
-func (p *Pool) Get(ctx context.Context) (*grpc.ClientConn, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.conns) < p.cap {
-		c, err := p.newConn(ctx)
-		if err != nil {
-			return nil, err
-		}
-		p.conns = append(p.conns, c)
-		return c, nil
-	}
-
-	conn := p.conns[p.next]
-	p.next = (p.next + 1) % p.cap
-	return conn, nil
-}
-
-// NewConnPool creates a new Pool by the specified conn factory function and capacity.
-func NewConnPool(cap int, newConn func(ctx context.Context) (*grpc.ClientConn, error)) *Pool {
-	return &Pool{
-		cap:     cap,
-		conns:   make([]*grpc.ClientConn, 0, cap),
-		newConn: newConn,
-
-		mu: sync.Mutex{},
-	}
-}
-
 // Mgr manages connections to a TiDB cluster.
 type Mgr struct {
 	*pdutil.PdController
-	tlsConf   *tls.Config
-	dom       *domain.Domain
-	storage   kv.Storage   // Used to access SQL related interfaces.
-	tikvStore tikv.Storage // Used to access TiKV specific interfaces.
-	grpcClis  struct {
+	tlsConf  *tls.Config
+	dom      *domain.Domain
+	storage  tikv.Storage
+	grpcClis struct {
 		mu   sync.Mutex
 		clis map[uint64]*grpc.ClientConn
 	}
@@ -145,7 +82,7 @@ func GetAllTiKVStores(
 	j := 0
 	for _, store := range stores {
 		isTiFlash := false
-		if version.IsTiFlash(store) {
+		if utils.IsTiFlash(store) {
 			if storeBehavior == SkipTiFlash {
 				continue
 			} else if storeBehavior == ErrorOnTiFlash {
@@ -164,39 +101,24 @@ func GetAllTiKVStores(
 }
 
 // NewMgr creates a new Mgr.
-//
-// Domain is optional for Backup, set `needDomain` to false to disable
-// initializing Domain.
 func NewMgr(
 	ctx context.Context,
 	g glue.Glue,
 	pdAddrs string,
-	storage kv.Storage,
+	storage tikv.Storage,
 	tlsConf *tls.Config,
 	securityOption pd.SecurityOption,
 	keepalive keepalive.ClientParameters,
 	storeBehavior StoreBehavior,
 	checkRequirements bool,
-	needDomain bool,
 ) (*Mgr, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
-		span1 := span.Tracer().StartSpan("conn.NewMgr", opentracing.ChildOf(span.Context()))
-		defer span1.Finish()
-		ctx = opentracing.ContextWithSpan(ctx, span1)
-	}
-
-	tikvStorage, ok := storage.(tikv.Storage)
-	if !ok {
-		return nil, berrors.ErrKVNotTiKV
-	}
-
 	controller, err := pdutil.NewPdController(ctx, pdAddrs, tlsConf, securityOption)
 	if err != nil {
 		log.Error("fail to create pd controller", zap.Error(err))
 		return nil, errors.Trace(err)
 	}
 	if checkRequirements {
-		err = version.CheckClusterVersion(ctx, controller.GetPDClient(), version.CheckVersionForBR)
+		err = utils.CheckClusterVersion(ctx, controller.GetPDClient())
 		if err != nil {
 			return nil, errors.Annotate(err, "running BR in incompatible version of cluster, "+
 				"if you believe it's OK, use --check-requirements=false to skip.")
@@ -217,19 +139,21 @@ func NewMgr(
 		}
 		liveStoreCount++
 	}
+	if liveStoreCount == 0 &&
+		// Assume 3 replicas
+		len(stores) >= 3 && len(stores) > liveStoreCount+1 {
+		log.Error("tikv cluster not health", zap.Reflect("stores", stores))
+		return nil, errors.Annotatef(berrors.ErrKVNotHealth, "%+v", stores)
+	}
 
-	var dom *domain.Domain
-	if needDomain {
-		dom, err = g.GetDomain(storage)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
+	dom, err := g.GetDomain(storage)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
 	mgr := &Mgr{
 		PdController: controller,
 		storage:      storage,
-		tikvStore:    tikvStorage,
 		dom:          dom,
 		tlsConf:      tlsConf,
 		ownsStorage:  g.OwnsStorage(),
@@ -240,20 +164,6 @@ func NewMgr(
 }
 
 func (mgr *Mgr) getGrpcConnLocked(ctx context.Context, storeID uint64) (*grpc.ClientConn, error) {
-	failpoint.Inject("hint-get-backup-client", func(v failpoint.Value) {
-		log.Info("failpoint hint-get-backup-client injected, "+
-			"process will notify the shell.", zap.Uint64("store", storeID))
-		if sigFile, ok := v.(string); ok {
-			file, err := os.Create(sigFile)
-			if err != nil {
-				log.Warn("failed to create file for notifying, skipping notify", zap.Error(err))
-			}
-			if file != nil {
-				file.Close()
-			}
-		}
-		time.Sleep(3 * time.Second)
-	})
 	store, err := mgr.GetPDClient().GetStore(ctx, storeID)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -279,23 +189,19 @@ func (mgr *Mgr) getGrpcConnLocked(ctx context.Context, storeID uint64) (*grpc.Cl
 	)
 	cancel()
 	if err != nil {
-		return nil, berrors.ErrFailedToConnect.Wrap(err).GenWithStack("failed to make connection to store %d", storeID)
+		return nil, errors.Trace(err)
 	}
 	return conn, nil
 }
 
 // GetBackupClient get or create a backup client.
-func (mgr *Mgr) GetBackupClient(ctx context.Context, storeID uint64) (backuppb.BackupClient, error) {
-	if ctx.Err() != nil {
-		return nil, errors.Trace(ctx.Err())
-	}
-
+func (mgr *Mgr) GetBackupClient(ctx context.Context, storeID uint64) (backup.BackupClient, error) {
 	mgr.grpcClis.mu.Lock()
 	defer mgr.grpcClis.mu.Unlock()
 
 	if conn, ok := mgr.grpcClis.clis[storeID]; ok {
 		// Find a cached backup client.
-		return backuppb.NewBackupClient(conn), nil
+		return backup.NewBackupClient(conn), nil
 	}
 
 	conn, err := mgr.getGrpcConnLocked(ctx, storeID)
@@ -304,15 +210,11 @@ func (mgr *Mgr) GetBackupClient(ctx context.Context, storeID uint64) (backuppb.B
 	}
 	// Cache the conn.
 	mgr.grpcClis.clis[storeID] = conn
-	return backuppb.NewBackupClient(conn), nil
+	return backup.NewBackupClient(conn), nil
 }
 
 // ResetBackupClient reset the connection for backup client.
-func (mgr *Mgr) ResetBackupClient(ctx context.Context, storeID uint64) (backuppb.BackupClient, error) {
-	if ctx.Err() != nil {
-		return nil, errors.Trace(ctx.Err())
-	}
-
+func (mgr *Mgr) ResetBackupClient(ctx context.Context, storeID uint64) (backup.BackupClient, error) {
 	mgr.grpcClis.mu.Lock()
 	defer mgr.grpcClis.mu.Unlock()
 
@@ -343,11 +245,11 @@ func (mgr *Mgr) ResetBackupClient(ctx context.Context, storeID uint64) (backuppb
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	return backuppb.NewBackupClient(conn), nil
+	return backup.NewBackupClient(conn), nil
 }
 
-// GetStorage returns a kv storage.
-func (mgr *Mgr) GetStorage() kv.Storage {
+// GetTiKV returns a tikv storage.
+func (mgr *Mgr) GetTiKV() tikv.Storage {
 	return mgr.storage
 }
 
@@ -358,7 +260,7 @@ func (mgr *Mgr) GetTLSConfig() *tls.Config {
 
 // GetLockResolver gets the LockResolver.
 func (mgr *Mgr) GetLockResolver() *tikv.LockResolver {
-	return mgr.tikvStore.GetLockResolver()
+	return mgr.storage.GetLockResolver()
 }
 
 // GetDomain returns a tikv storage.
@@ -383,7 +285,8 @@ func (mgr *Mgr) Close() {
 		if mgr.dom != nil {
 			mgr.dom.Close()
 		}
-		tikv.StoreShuttingDown(1)
+
+		atomic.StoreUint32(&tikv.ShuttingDown, 1)
 		mgr.storage.Close()
 	}
 

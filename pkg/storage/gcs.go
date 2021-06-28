@@ -11,7 +11,7 @@ import (
 
 	"cloud.google.com/go/storage"
 	"github.com/pingcap/errors"
-	backuppb "github.com/pingcap/kvproto/pkg/backup"
+	"github.com/pingcap/kvproto/pkg/backup"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
@@ -37,7 +37,7 @@ type GCSBackendOptions struct {
 	CredentialsFile string `json:"credentials-file" toml:"credentials-file"`
 }
 
-func (options *GCSBackendOptions) apply(gcs *backuppb.GCS) error {
+func (options *GCSBackendOptions) apply(gcs *backup.GCS) error {
 	gcs.Endpoint = options.Endpoint
 	gcs.StorageClass = options.StorageClass
 	gcs.PredefinedAcl = options.PredefinedACL
@@ -85,7 +85,7 @@ func (options *GCSBackendOptions) parseFromFlags(flags *pflag.FlagSet) error {
 }
 
 type gcsStorage struct {
-	gcs    *backuppb.GCS
+	gcs    *backup.GCS
 	bucket *storage.BucketHandle
 }
 
@@ -93,8 +93,8 @@ func (s *gcsStorage) objectName(name string) string {
 	return path.Join(s.gcs.Prefix, name)
 }
 
-// WriteFile writes data to a file to storage.
-func (s *gcsStorage) WriteFile(ctx context.Context, name string, data []byte) error {
+// Write file to storage.
+func (s *gcsStorage) Write(ctx context.Context, name string, data []byte) error {
 	object := s.objectName(name)
 	wc := s.bucket.Object(object).NewWriter(ctx)
 	wc.StorageClass = s.gcs.StorageClass
@@ -106,14 +106,12 @@ func (s *gcsStorage) WriteFile(ctx context.Context, name string, data []byte) er
 	return wc.Close()
 }
 
-// ReadFile reads the file from the storage and returns the contents.
-func (s *gcsStorage) ReadFile(ctx context.Context, name string) ([]byte, error) {
+// Read storage file.
+func (s *gcsStorage) Read(ctx context.Context, name string) ([]byte, error) {
 	object := s.objectName(name)
 	rc, err := s.bucket.Object(object).NewReader(ctx)
 	if err != nil {
-		return nil, errors.Annotatef(err,
-			"failed to read gcs file, file info: input.bucket='%s', input.key='%s'",
-			s.gcs.Bucket, object)
+		return nil, errors.Trace(err)
 	}
 	defer rc.Close()
 
@@ -143,7 +141,7 @@ func (s *gcsStorage) FileExists(ctx context.Context, name string) (bool, error) 
 }
 
 // Open a Reader by file path.
-func (s *gcsStorage) Open(ctx context.Context, path string) (ExternalFileReader, error) {
+func (s *gcsStorage) Open(ctx context.Context, path string) (ReadSeekCloser, error) {
 	// TODO, implement this if needed
 	panic("Unsupported Operation")
 }
@@ -163,39 +161,32 @@ func (s *gcsStorage) URI() string {
 	return "gcs://" + s.gcs.Bucket + "/" + s.gcs.Prefix
 }
 
-// Create implements ExternalStorage interface.
-func (s *gcsStorage) Create(ctx context.Context, name string) (ExternalFileWriter, error) {
-	object := s.objectName(name)
-	wc := s.bucket.Object(object).NewWriter(ctx)
-	wc.StorageClass = s.gcs.StorageClass
-	wc.PredefinedACL = s.gcs.PredefinedAcl
-	return newFlushStorageWriter(wc, &emptyFlusher{}, wc), nil
+// CreateUploader implenments ExternalStorage interface.
+func (s *gcsStorage) CreateUploader(ctx context.Context, name string) (Uploader, error) {
+	// TODO, implement this if needed
+	panic("gcs storage not support multi-upload")
 }
 
-func newGCSStorage(ctx context.Context, gcs *backuppb.GCS, opts *ExternalStorageOptions) (*gcsStorage, error) {
+func newGCSStorage(ctx context.Context, gcs *backup.GCS, opts *ExternalStorageOptions) (*gcsStorage, error) {
 	var clientOps []option.ClientOption
-	if opts.NoCredentials {
-		clientOps = append(clientOps, option.WithoutAuthentication())
-	} else {
-		if gcs.CredentialsBlob == "" {
-			creds, err := google.FindDefaultCredentials(ctx, storage.ScopeReadWrite)
-			if err != nil {
-				return nil, errors.Annotatef(berrors.ErrStorageInvalidConfig, "%v Or you should provide '--gcs.credentials_file'", err)
-			}
-			if opts.SendCredentials {
-				if len(creds.JSON) > 0 {
-					gcs.CredentialsBlob = string(creds.JSON)
-				} else {
-					return nil, errors.Annotate(berrors.ErrStorageInvalidConfig,
-						"You should provide '--gcs.credentials_file' when '--send-credentials-to-tikv' is true")
-				}
-			}
-			if creds != nil {
-				clientOps = append(clientOps, option.WithCredentials(creds))
-			}
-		} else {
-			clientOps = append(clientOps, option.WithCredentialsJSON([]byte(gcs.GetCredentialsBlob())))
+	if gcs.CredentialsBlob == "" {
+		creds, err := google.FindDefaultCredentials(ctx, storage.ScopeReadWrite)
+		if err != nil {
+			return nil, errors.Annotatef(berrors.ErrStorageInvalidConfig, "%v Or you should provide '--gcs.credentials_file'", err)
 		}
+		if opts.SendCredentials {
+			if len(creds.JSON) > 0 {
+				gcs.CredentialsBlob = string(creds.JSON)
+			} else {
+				return nil, errors.Annotate(berrors.ErrStorageInvalidConfig,
+					"You should provide '--gcs.credentials_file' when '--send-credentials-to-tikv' is true")
+			}
+		}
+		if creds != nil {
+			clientOps = append(clientOps, option.WithCredentials(creds))
+		}
+	} else {
+		clientOps = append(clientOps, option.WithCredentialsJSON([]byte(gcs.GetCredentialsBlob())))
 	}
 
 	if gcs.Endpoint != "" {
@@ -227,12 +218,11 @@ func newGCSStorage(ctx context.Context, gcs *backuppb.GCS, opts *ExternalStorage
 		// so we need find sst in slash directory
 		gcs.Prefix += "//"
 	}
-	// TODO remove it after BR remove cfg skip-check-path
 	if !opts.SkipCheckPath {
 		// check bucket exists
 		_, err = bucket.Attrs(ctx)
 		if err != nil {
-			return nil, errors.Annotatef(err, "gcs://%s/%s", gcs.Bucket, gcs.Prefix)
+			return nil, errors.Trace(err)
 		}
 	}
 	return &gcsStorage{gcs: gcs, bucket: bucket}, nil

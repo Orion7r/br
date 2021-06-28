@@ -6,11 +6,8 @@ import (
 	"bytes"
 	"context"
 
-	"github.com/pingcap/br/pkg/metautil"
-
-	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
-	backuppb "github.com/pingcap/kvproto/pkg/backup"
+	kvproto "github.com/pingcap/kvproto/pkg/backup"
 	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -80,7 +77,7 @@ func (cfg *RawKvConfig) ParseFromFlags(flags *pflag.FlagSet) error {
 		return errors.Trace(err)
 	}
 
-	if len(cfg.StartKey) > 0 && len(cfg.EndKey) > 0 && bytes.Compare(cfg.StartKey, cfg.EndKey) >= 0 {
+	if bytes.Compare(cfg.StartKey, cfg.EndKey) >= 0 {
 		return errors.Annotate(berrors.ErrBackupInvalidRange, "endKey must be greater than startKey")
 	}
 	cfg.CF, err = flags.GetString(flagTiKVColumnFamily)
@@ -127,19 +124,11 @@ func RunBackupRaw(c context.Context, g glue.Glue, cmdName string, cfg *RawKvConf
 	ctx, cancel := context.WithCancel(c)
 	defer cancel()
 
-	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
-		span1 := span.Tracer().StartSpan("task.RunBackupRaw", opentracing.ChildOf(span.Context()))
-		defer span1.Finish()
-		ctx = opentracing.ContextWithSpan(ctx, span1)
-	}
-
 	u, err := storage.ParseBackend(cfg.Storage, &cfg.BackendOptions)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	// Backup raw does not need domain.
-	needDomain := false
-	mgr, err := NewMgr(ctx, g, cfg.PD, cfg.TLS, GetKeepalive(&cfg.Config), cfg.CheckRequirements, needDomain)
+	mgr, err := NewMgr(ctx, g, cfg.PD, cfg.TLS, GetKeepalive(&cfg.Config), cfg.CheckRequirements)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -149,12 +138,7 @@ func RunBackupRaw(c context.Context, g glue.Glue, cmdName string, cfg *RawKvConf
 	if err != nil {
 		return errors.Trace(err)
 	}
-	opts := storage.ExternalStorageOptions{
-		NoCredentials:   cfg.NoCreds,
-		SendCredentials: cfg.SendCreds,
-		SkipCheckPath:   cfg.SkipCheckPath,
-	}
-	if err = client.SetStorage(ctx, u, &opts); err != nil {
+	if err = client.SetStorage(ctx, u, cfg.SendCreds); err != nil {
 		return errors.Trace(err)
 	}
 
@@ -176,12 +160,6 @@ func RunBackupRaw(c context.Context, g glue.Glue, cmdName string, cfg *RawKvConf
 		}
 	}
 
-	brVersion := g.GetVersion()
-	clusterVersion, err := mgr.GetClusterVersion(ctx)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
 	// The number of regions need to backup
 	approximateRegions, err := mgr.GetRegionCount(ctx, backupRange.StartKey, backupRange.EndKey)
 	if err != nil {
@@ -195,15 +173,7 @@ func RunBackupRaw(c context.Context, g glue.Glue, cmdName string, cfg *RawKvConf
 	updateCh := g.StartProgress(
 		ctx, cmdName, int64(approximateRegions), !cfg.LogProgress)
 
-	progressCallBack := func(unit backup.ProgressUnit) {
-		if unit == backup.RangeUnit {
-			return
-		}
-		updateCh.Inc()
-	}
-
-	req := backuppb.BackupRequest{
-		ClusterId:        client.GetClusterID(),
+	req := kvproto.BackupRequest{
 		StartVersion:     0,
 		EndVersion:       0,
 		RateLimit:        cfg.RateLimit,
@@ -213,29 +183,25 @@ func RunBackupRaw(c context.Context, g glue.Glue, cmdName string, cfg *RawKvConf
 		CompressionType:  cfg.CompressionType,
 		CompressionLevel: cfg.CompressionLevel,
 	}
-	metaWriter := metautil.NewMetaWriter(client.GetStorage(), metautil.MetaFileSize, false)
-	metaWriter.StartWriteMetasAsync(ctx, metautil.AppendDataFile)
-	err = client.BackupRange(ctx, backupRange.StartKey, backupRange.EndKey, req, metaWriter, progressCallBack)
+	files, err := client.BackupRange(ctx, backupRange.StartKey, backupRange.EndKey, req, updateCh)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	// Backup has finished
 	updateCh.Close()
-	rawRanges := []*backuppb.RawRange{{StartKey: backupRange.StartKey, EndKey: backupRange.EndKey, Cf: cfg.CF}}
-	metaWriter.Update(func(m *backuppb.BackupMeta) {
-		m.StartVersion = req.StartVersion
-		m.EndVersion = req.EndVersion
-		m.IsRawKv = req.IsRawKv
-		m.RawRanges = rawRanges
-		m.ClusterId = req.ClusterId
-		m.ClusterVersion = clusterVersion
-		m.BrVersion = brVersion
-	})
-	err = metaWriter.FinishWriteMetas(ctx, metautil.AppendDataFile)
+
+	// Checksum
+	rawRanges := []*kvproto.RawRange{{StartKey: backupRange.StartKey, EndKey: backupRange.EndKey, Cf: cfg.CF}}
+	backupMeta, err := backup.BuildBackupMeta(&req, files, rawRanges, nil)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	g.Record(summary.BackupDataSize, metaWriter.ArchiveSize())
+	err = client.SaveBackupMeta(ctx, &backupMeta)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	g.Record("Size", utils.ArchiveSize(&backupMeta))
 
 	// Set task summary to success status.
 	summary.SetSuccessStatus(true)

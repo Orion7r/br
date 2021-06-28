@@ -12,7 +12,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/import_sstpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/tidb/distsql"
+	"github.com/pingcap/tidb/tablecodec"
 	"github.com/pingcap/tidb/util/codec"
+	"github.com/pingcap/tidb/util/ranger"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 
@@ -20,7 +23,7 @@ import (
 	"github.com/pingcap/br/pkg/rtree"
 )
 
-type TestClient struct {
+type testClient struct {
 	mu           sync.RWMutex
 	stores       map[uint64]*metapb.Store
 	regions      map[uint64]*restore.RegionInfo
@@ -28,16 +31,16 @@ type TestClient struct {
 	nextRegionID uint64
 }
 
-func NewTestClient(
+func newTestClient(
 	stores map[uint64]*metapb.Store,
 	regions map[uint64]*restore.RegionInfo,
 	nextRegionID uint64,
-) *TestClient {
+) *testClient {
 	regionsInfo := core.NewRegionsInfo()
 	for _, regionInfo := range regions {
-		regionsInfo.SetRegion(core.NewRegionInfo(regionInfo.Region, regionInfo.Leader))
+		regionsInfo.AddRegion(core.NewRegionInfo(regionInfo.Region, regionInfo.Leader))
 	}
-	return &TestClient{
+	return &testClient{
 		stores:       stores,
 		regions:      regions,
 		regionsInfo:  regionsInfo,
@@ -45,13 +48,13 @@ func NewTestClient(
 	}
 }
 
-func (c *TestClient) GetAllRegions() map[uint64]*restore.RegionInfo {
+func (c *testClient) GetAllRegions() map[uint64]*restore.RegionInfo {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.regions
 }
 
-func (c *TestClient) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error) {
+func (c *testClient) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	store, ok := c.stores[storeID]
@@ -61,7 +64,7 @@ func (c *TestClient) GetStore(ctx context.Context, storeID uint64) (*metapb.Stor
 	return store, nil
 }
 
-func (c *TestClient) GetRegion(ctx context.Context, key []byte) (*restore.RegionInfo, error) {
+func (c *testClient) GetRegion(ctx context.Context, key []byte) (*restore.RegionInfo, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	for _, region := range c.regions {
@@ -73,7 +76,7 @@ func (c *TestClient) GetRegion(ctx context.Context, key []byte) (*restore.Region
 	return nil, errors.Errorf("region not found: key=%s", string(key))
 }
 
-func (c *TestClient) GetRegionByID(ctx context.Context, regionID uint64) (*restore.RegionInfo, error) {
+func (c *testClient) GetRegionByID(ctx context.Context, regionID uint64) (*restore.RegionInfo, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	region, ok := c.regions[regionID]
@@ -83,7 +86,7 @@ func (c *TestClient) GetRegionByID(ctx context.Context, regionID uint64) (*resto
 	return region, nil
 }
 
-func (c *TestClient) SplitRegion(
+func (c *testClient) SplitRegion(
 	ctx context.Context,
 	regionInfo *restore.RegionInfo,
 	key []byte,
@@ -116,7 +119,7 @@ func (c *TestClient) SplitRegion(
 	return newRegion, nil
 }
 
-func (c *TestClient) BatchSplitRegionsWithOrigin(
+func (c *testClient) BatchSplitRegionsWithOrigin(
 	ctx context.Context, regionInfo *restore.RegionInfo, keys [][]byte,
 ) (*restore.RegionInfo, []*restore.RegionInfo, error) {
 	c.mu.Lock()
@@ -152,24 +155,24 @@ func (c *TestClient) BatchSplitRegionsWithOrigin(
 	return region, newRegions, nil
 }
 
-func (c *TestClient) BatchSplitRegions(
+func (c *testClient) BatchSplitRegions(
 	ctx context.Context, regionInfo *restore.RegionInfo, keys [][]byte,
 ) ([]*restore.RegionInfo, error) {
 	_, newRegions, err := c.BatchSplitRegionsWithOrigin(ctx, regionInfo, keys)
 	return newRegions, err
 }
 
-func (c *TestClient) ScatterRegion(ctx context.Context, regionInfo *restore.RegionInfo) error {
+func (c *testClient) ScatterRegion(ctx context.Context, regionInfo *restore.RegionInfo) error {
 	return nil
 }
 
-func (c *TestClient) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {
+func (c *testClient) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {
 	return &pdpb.GetOperatorResponse{
 		Header: new(pdpb.ResponseHeader),
 	}, nil
 }
 
-func (c *TestClient) ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*restore.RegionInfo, error) {
+func (c *testClient) ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*restore.RegionInfo, error) {
 	infos := c.regionsInfo.ScanRange(key, endKey, limit)
 	regions := make([]*restore.RegionInfo, 0, len(infos))
 	for _, info := range infos {
@@ -181,19 +184,19 @@ func (c *TestClient) ScanRegions(ctx context.Context, key, endKey []byte, limit 
 	return regions, nil
 }
 
-func (c *TestClient) GetPlacementRule(ctx context.Context, groupID, ruleID string) (r placement.Rule, err error) {
+func (c *testClient) GetPlacementRule(ctx context.Context, groupID, ruleID string) (r placement.Rule, err error) {
 	return
 }
 
-func (c *TestClient) SetPlacementRule(ctx context.Context, rule placement.Rule) error {
+func (c *testClient) SetPlacementRule(ctx context.Context, rule placement.Rule) error {
 	return nil
 }
 
-func (c *TestClient) DeletePlacementRule(ctx context.Context, groupID, ruleID string) error {
+func (c *testClient) DeletePlacementRule(ctx context.Context, groupID, ruleID string) error {
 	return nil
 }
 
-func (c *TestClient) SetStoresLabel(ctx context.Context, stores []uint64, labelKey, labelValue string) error {
+func (c *testClient) SetStoresLabel(ctx context.Context, stores []uint64, labelKey, labelValue string) error {
 	return nil
 }
 
@@ -203,7 +206,7 @@ func (c *TestClient) SetStoresLabel(ctx context.Context, stores []uint64, labelK
 // expected regions after split:
 //   [, aay), [aay, bb), [bb, bba), [bba, bbf), [bbf, bbh), [bbh, bbj),
 //   [bbj, cca), [cca, xx), [xx, xxe), [xxe, xxz), [xxz, )
-func (s *testRangeSuite) TestSplit(c *C) {
+func (s *testRestoreUtilSuite) TestSplit(c *C) {
 	client := initTestClient()
 	ranges := initRanges()
 	rewriteRules := initRewriteRules()
@@ -225,7 +228,7 @@ func (s *testRangeSuite) TestSplit(c *C) {
 }
 
 // region: [, aay), [aay, bba), [bba, bbh), [bbh, cca), [cca, )
-func initTestClient() *TestClient {
+func initTestClient() *testClient {
 	peers := make([]*metapb.Peer, 1)
 	peers[0] = &metapb.Peer{
 		Id:      1,
@@ -255,7 +258,7 @@ func initTestClient() *TestClient {
 	stores[1] = &metapb.Store{
 		Id: 1,
 	}
-	return NewTestClient(stores, regions, 6)
+	return newTestClient(stores, regions, 6)
 }
 
 // range: [aaa, aae), [aae, aaz), [ccd, ccf), [ccf, ccj)
@@ -291,7 +294,8 @@ func initRewriteRules() *restore.RewriteRules {
 		NewKeyPrefix: []byte("bb"),
 	}
 	return &restore.RewriteRules{
-		Data: rules[:],
+		Table: rules[:],
+		Data:  rules[:],
 	}
 }
 
@@ -324,7 +328,37 @@ FindRegion:
 	return true
 }
 
-func (s *testRangeSuite) TestNeedSplit(c *C) {
+func (s *testRestoreUtilSuite) TestGetSplitKeys(c *C) {
+	rewriteRules := &restore.RewriteRules{}
+	regions := []*restore.RegionInfo{
+		{
+			// last region's endkey is empty.
+			Region: &metapb.Region{
+				Id:       1,
+				StartKey: codec.EncodeBytes([]byte{}, []byte("t1")),
+				EndKey:   nil,
+			},
+		},
+	}
+	r := ranger.FullIntRange(false)
+	tableID := int64(1)
+	kvRanges := distsql.TableRangesToKVRanges(tableID, r, nil)
+	ranges := []rtree.Range{
+		{
+			StartKey: kvRanges[0].StartKey,
+			// this endkey is HighInclude, so it will generate one more zero byte.
+			EndKey: kvRanges[0].EndKey,
+		},
+	}
+	keyMap := restore.GetSplitKeys(rewriteRules, ranges, regions)
+	c.Assert(len(keyMap[1]), Equals, 1)
+	// this key should truncated already, then it's as same as HighExclude endkey.
+	highPrefixNext := keyMap[1][0]
+	highWithoutPrefixNext := tablecodec.EncodeRowKey(tableID, codec.EncodeInt(nil, r[0].HighVal[0].GetInt64()))
+	c.Assert(bytes.Equal(highPrefixNext, highWithoutPrefixNext), IsTrue)
+}
+
+func (s *testRestoreUtilSuite) TestNeedSplit(c *C) {
 	regions := []*restore.RegionInfo{
 		{
 			Region: &metapb.Region{

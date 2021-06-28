@@ -1,6 +1,3 @@
-[storage]
-reserve-space = "1KB"
-
 [raftstore]
 # true (default value) for high reliability, this can prevent data loss when power failure.
 sync-log = true

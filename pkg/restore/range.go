@@ -4,8 +4,6 @@ package restore
 
 import (
 	"bytes"
-	"sort"
-	"sync"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/import_sstpb"
@@ -18,43 +16,6 @@ import (
 	"github.com/pingcap/br/pkg/logutil"
 	"github.com/pingcap/br/pkg/rtree"
 )
-
-// Range record start and end key for localStoreDir.DB
-// so we can write it to tikv in streaming
-type Range struct {
-	Start []byte
-	End   []byte
-}
-
-type syncdRanges struct {
-	sync.Mutex
-	ranges []Range
-}
-
-func (r *syncdRanges) add(g Range) {
-	r.Lock()
-	r.ranges = append(r.ranges, g)
-	r.Unlock()
-}
-
-func (r *syncdRanges) take() []Range {
-	r.Lock()
-	rg := r.ranges
-	r.ranges = []Range{}
-	r.Unlock()
-	if len(rg) > 0 {
-		sort.Slice(rg, func(i, j int) bool {
-			return bytes.Compare(rg[i].Start, rg[j].Start) < 0
-		})
-	}
-	return rg
-}
-
-func newSyncdRanges() *syncdRanges {
-	return &syncdRanges{
-		ranges: make([]Range, 0, 128),
-	}
-}
 
 // SortRanges checks if the range overlapped and sort them.
 func SortRanges(ranges []rtree.Range, rewriteRules *RewriteRules) ([]rtree.Range, error) {
@@ -120,17 +81,20 @@ func (region *RegionInfo) ContainsInterior(key []byte) bool {
 
 // RewriteRules contains rules for rewriting keys of tables.
 type RewriteRules struct {
-	Data []*import_sstpb.RewriteRule
+	Table []*import_sstpb.RewriteRule
+	Data  []*import_sstpb.RewriteRule
 }
 
 // Append append its argument to this rewrite rules.
 func (r *RewriteRules) Append(other RewriteRules) {
 	r.Data = append(r.Data, other.Data...)
+	r.Table = append(r.Table, other.Table...)
 }
 
 // EmptyRewriteRule make a new, empty rewrite rule.
 func EmptyRewriteRule() *RewriteRules {
 	return &RewriteRules{
-		Data: []*import_sstpb.RewriteRule{},
+		Table: []*import_sstpb.RewriteRule{},
+		Data:  []*import_sstpb.RewriteRule{},
 	}
 }

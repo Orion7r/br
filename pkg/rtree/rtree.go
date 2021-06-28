@@ -6,7 +6,7 @@ import (
 	"bytes"
 
 	"github.com/google/btree"
-	backuppb "github.com/pingcap/kvproto/pkg/backup"
+	"github.com/pingcap/kvproto/pkg/backup"
 	"github.com/pingcap/log"
 
 	"github.com/pingcap/br/pkg/logutil"
@@ -16,19 +16,10 @@ import (
 type Range struct {
 	StartKey []byte
 	EndKey   []byte
-	Files    []*backuppb.File
+	Files    []*backup.File
 }
 
-// BytesAndKeys returns total bytes and keys in a range.
-func (rg *Range) BytesAndKeys() (bytes, keys uint64) {
-	for _, f := range rg.Files {
-		bytes += f.TotalBytes
-		keys += f.TotalKvs
-	}
-	return
-}
-
-// Intersect returns intersect range in the tree.
+// Intersect returns?
 func (rg *Range) Intersect(
 	start, end []byte,
 ) (subStart, subEnd []byte, isIntersect bool) {
@@ -145,7 +136,7 @@ func (rangeTree *RangeTree) Update(rg Range) {
 
 // Put forms a range and inserts it into tree.
 func (rangeTree *RangeTree) Put(
-	startKey, endKey []byte, files []*backuppb.File,
+	startKey, endKey []byte, files []*backup.File,
 ) {
 	rg := Range{
 		StartKey: startKey,

@@ -9,22 +9,20 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	backuppb "github.com/pingcap/kvproto/pkg/backup"
+	kvproto "github.com/pingcap/kvproto/pkg/backup"
 	"github.com/pingcap/kvproto/pkg/errorpb"
-	"github.com/pingcap/parser/model"
+	"github.com/DigitalChinaOpenSource/DCParser/model"
 	"github.com/pingcap/tidb/kv"
+	"github.com/pingcap/tidb/store/mockstore/mocktikv"
+	"github.com/pingcap/tidb/store/tikv"
+	"github.com/pingcap/tidb/store/tikv/oracle"
 	"github.com/pingcap/tidb/tablecodec"
-	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/util/codec"
-	"github.com/tikv/client-go/v2/mockstore/mocktikv"
-	"github.com/tikv/client-go/v2/oracle"
-	"github.com/tikv/client-go/v2/tikv"
 	pd "github.com/tikv/pd/client"
 
 	"github.com/pingcap/br/pkg/backup"
 	"github.com/pingcap/br/pkg/conn"
 	"github.com/pingcap/br/pkg/pdutil"
-	"github.com/pingcap/br/pkg/storage"
 )
 
 type testBackup struct {
@@ -42,8 +40,7 @@ func TestT(t *testing.T) {
 }
 
 func (r *testBackup) SetUpSuite(c *C) {
-	mvccStore := mocktikv.MustNewMVCCStore()
-	r.mockPDClient = mocktikv.NewPDClient(mocktikv.NewCluster(mvccStore))
+	r.mockPDClient = mocktikv.NewPDClient(mocktikv.NewCluster())
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	mockMgr := &conn.Mgr{PdController: &pdutil.PdController{}}
 	mockMgr.SetPDClient(r.mockPDClient)
@@ -105,7 +102,7 @@ func (r *testBackup) TestGetTS(c *C) {
 	c.Assert(ts, Equals, backupts)
 }
 
-func (r *testBackup) TestBuildTableRangeIntHandle(c *C) {
+func (r *testBackup) TestBuildTableRange(c *C) {
 	type Case struct {
 		ids []int64
 		trs []kv.KeyRange
@@ -146,62 +143,18 @@ func (r *testBackup) TestBuildTableRangeIntHandle(c *C) {
 	})
 }
 
-func (r *testBackup) TestBuildTableRangeCommonHandle(c *C) {
-	type Case struct {
-		ids []int64
-		trs []kv.KeyRange
-	}
-	low, err_l := codec.EncodeKey(nil, nil, []types.Datum{types.MinNotNullDatum()}...)
-	c.Assert(err_l, IsNil)
-	high, err_h := codec.EncodeKey(nil, nil, []types.Datum{types.MaxValueDatum()}...)
-	c.Assert(err_h, IsNil)
-	high = kv.Key(high).PrefixNext()
-	cases := []Case{
-		{ids: []int64{1}, trs: []kv.KeyRange{
-			{StartKey: tablecodec.EncodeRowKey(1, low), EndKey: tablecodec.EncodeRowKey(1, high)},
-		}},
-		{ids: []int64{1, 2, 3}, trs: []kv.KeyRange{
-			{StartKey: tablecodec.EncodeRowKey(1, low), EndKey: tablecodec.EncodeRowKey(1, high)},
-			{StartKey: tablecodec.EncodeRowKey(2, low), EndKey: tablecodec.EncodeRowKey(2, high)},
-			{StartKey: tablecodec.EncodeRowKey(3, low), EndKey: tablecodec.EncodeRowKey(3, high)},
-		}},
-		{ids: []int64{1, 3}, trs: []kv.KeyRange{
-			{StartKey: tablecodec.EncodeRowKey(1, low), EndKey: tablecodec.EncodeRowKey(1, high)},
-			{StartKey: tablecodec.EncodeRowKey(3, low), EndKey: tablecodec.EncodeRowKey(3, high)},
-		}},
-	}
-	for _, cs := range cases {
-		c.Log(cs)
-		tbl := &model.TableInfo{Partition: &model.PartitionInfo{Enable: true}, IsCommonHandle: true}
-		for _, id := range cs.ids {
-			tbl.Partition.Definitions = append(tbl.Partition.Definitions,
-				model.PartitionDefinition{ID: id})
-		}
-		ranges, err := backup.BuildTableRanges(tbl)
-		c.Assert(err, IsNil)
-		c.Assert(ranges, DeepEquals, cs.trs)
-	}
-
-	tbl := &model.TableInfo{ID: 7, IsCommonHandle: true}
-	ranges, err_r := backup.BuildTableRanges(tbl)
-	c.Assert(err_r, IsNil)
-	c.Assert(ranges, DeepEquals, []kv.KeyRange{
-		{StartKey: tablecodec.EncodeRowKey(7, low), EndKey: tablecodec.EncodeRowKey(7, high)},
-	})
-}
-
 func (r *testBackup) TestOnBackupRegionErrorResponse(c *C) {
 	type Case struct {
 		storeID           uint64
 		bo                *tikv.Backoffer
 		backupTS          uint64
 		lockResolver      *tikv.LockResolver
-		resp              *backuppb.BackupResponse
+		resp              *kvproto.BackupResponse
 		exceptedBackoffMs int
 		exceptedErr       bool
 	}
-	newBackupRegionErrorResp := func(regionError *errorpb.Error) *backuppb.BackupResponse {
-		return &backuppb.BackupResponse{Error: &backuppb.Error{Detail: &backuppb.Error_RegionError{RegionError: regionError}}}
+	newBackupRegionErrorResp := func(regionError *errorpb.Error) *kvproto.BackupResponse {
+		return &kvproto.BackupResponse{Error: &kvproto.Error{Detail: &kvproto.Error_RegionError{RegionError: regionError}}}
 	}
 
 	cases := []Case{
@@ -226,46 +179,4 @@ func (r *testBackup) TestOnBackupRegionErrorResponse(c *C) {
 			c.Assert(err, IsNil)
 		}
 	}
-}
-
-func (r *testBackup) TestSendCreds(c *C) {
-	accessKey := "ab"
-	secretAccessKey := "cd"
-	backendOpt := storage.BackendOptions{
-		S3: storage.S3BackendOptions{
-			AccessKey:       accessKey,
-			SecretAccessKey: secretAccessKey,
-		},
-	}
-	backend, err := storage.ParseBackend("s3://bucket/prefix/", &backendOpt)
-	c.Assert(err, IsNil)
-	opts := &storage.ExternalStorageOptions{
-		SendCredentials: true,
-		SkipCheckPath:   true,
-	}
-	_, err = storage.New(r.ctx, backend, opts)
-	c.Assert(err, IsNil)
-	access_key := backend.GetS3().AccessKey
-	c.Assert(access_key, Equals, "ab")
-	secret_access_key := backend.GetS3().SecretAccessKey
-	c.Assert(secret_access_key, Equals, "cd")
-
-	backendOpt = storage.BackendOptions{
-		S3: storage.S3BackendOptions{
-			AccessKey:       accessKey,
-			SecretAccessKey: secretAccessKey,
-		},
-	}
-	backend, err = storage.ParseBackend("s3://bucket/prefix/", &backendOpt)
-	c.Assert(err, IsNil)
-	opts = &storage.ExternalStorageOptions{
-		SendCredentials: false,
-		SkipCheckPath:   true,
-	}
-	_, err = storage.New(r.ctx, backend, opts)
-	c.Assert(err, IsNil)
-	access_key = backend.GetS3().AccessKey
-	c.Assert(access_key, Equals, "")
-	secret_access_key = backend.GetS3().SecretAccessKey
-	c.Assert(secret_access_key, Equals, "")
 }

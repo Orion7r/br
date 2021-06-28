@@ -89,7 +89,7 @@ func (s *testLogRestoreSuite) TestTsInRange(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(collected, IsTrue)
 
-	for _, fileName := range []string{"ddl", "dld.1"} {
+	for _, fileName := range []string{"ddl", "dld"} {
 		// wrong format won't collect
 		collected, err = s.client.NeedRestoreDDL(fileName)
 		c.Assert(err, IsNil)

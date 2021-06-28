@@ -5,8 +5,6 @@ package task
 import (
 	"context"
 
-	"github.com/pingcap/br/pkg/metautil"
-
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
@@ -22,7 +20,8 @@ import (
 // RestoreRawConfig is the configuration specific for raw kv restore tasks.
 type RestoreRawConfig struct {
 	RawKvConfig
-	RestoreCommonConfig
+
+	Online bool `json:"online" toml:"online"`
 }
 
 // DefineRawRestoreFlags defines common flags for the backup command.
@@ -32,7 +31,9 @@ func DefineRawRestoreFlags(command *cobra.Command) {
 	command.Flags().StringP(flagStartKey, "", "", "restore raw kv start key, key is inclusive")
 	command.Flags().StringP(flagEndKey, "", "", "restore raw kv end key, key is exclusive")
 
-	DefineRestoreCommonFlags(command.PersistentFlags())
+	command.Flags().Bool(flagOnline, false, "Whether online when restore")
+	// TODO remove hidden flag if it's stable
+	_ = command.Flags().MarkHidden(flagOnline)
 }
 
 // ParseFromFlags parses the backup-related flags from the flag set.
@@ -42,16 +43,11 @@ func (cfg *RestoreRawConfig) ParseFromFlags(flags *pflag.FlagSet) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	err = cfg.RestoreCommonConfig.ParseFromFlags(flags)
-	if err != nil {
-		return errors.Trace(err)
-	}
 	return cfg.RawKvConfig.ParseFromFlags(flags)
 }
 
 func (cfg *RestoreRawConfig) adjust() {
 	cfg.Config.adjust()
-	cfg.RestoreCommonConfig.adjust()
 
 	if cfg.Concurrency == 0 {
 		cfg.Concurrency = defaultRestoreConcurrency
@@ -66,9 +62,7 @@ func RunRestoreRaw(c context.Context, g glue.Glue, cmdName string, cfg *RestoreR
 	ctx, cancel := context.WithCancel(c)
 	defer cancel()
 
-	// Restore raw does not need domain.
-	needDomain := false
-	mgr, err := NewMgr(ctx, g, cfg.PD, cfg.TLS, GetKeepalive(&cfg.Config), cfg.CheckRequirements, needDomain)
+	mgr, err := NewMgr(ctx, g, cfg.PD, cfg.TLS, GetKeepalive(&cfg.Config), cfg.CheckRequirements)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -78,7 +72,7 @@ func RunRestoreRaw(c context.Context, g glue.Glue, cmdName string, cfg *RestoreR
 	// sometimes we have pooled the connections.
 	// sending heartbeats in idle times is useful.
 	keepaliveCfg.PermitWithoutStream = true
-	client, err := restore.NewRestoreClient(g, mgr.GetPDClient(), mgr.GetStorage(), mgr.GetTLSConfig(), keepaliveCfg)
+	client, err := restore.NewRestoreClient(g, mgr.GetPDClient(), mgr.GetTiKV(), mgr.GetTLSConfig(), keepaliveCfg)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -90,12 +84,12 @@ func RunRestoreRaw(c context.Context, g glue.Glue, cmdName string, cfg *RestoreR
 	}
 	client.SetSwitchModeInterval(cfg.SwitchModeInterval)
 
-	u, s, backupMeta, err := ReadBackupMeta(ctx, metautil.MetaFile, &cfg.Config)
+	u, _, backupMeta, err := ReadBackupMeta(ctx, utils.MetaFile, &cfg.Config)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	g.Record(summary.RestoreDataSize, utils.ArchiveSize(backupMeta))
-	if err = client.InitBackupMeta(c, backupMeta, u, s); err != nil {
+	g.Record("Size", utils.ArchiveSize(backupMeta))
+	if err = client.InitBackupMeta(backupMeta, u); err != nil {
 		return errors.Trace(err)
 	}
 
@@ -114,8 +108,7 @@ func RunRestoreRaw(c context.Context, g glue.Glue, cmdName string, cfg *RestoreR
 	}
 	summary.CollectInt("restore files", len(files))
 
-	ranges, _, err := restore.MergeFileRanges(
-		files, cfg.MergeSmallRegionKeyCount, cfg.MergeSmallRegionKeyCount)
+	ranges, err := restore.ValidateFileRanges(files, nil)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -129,9 +122,7 @@ func RunRestoreRaw(c context.Context, g glue.Glue, cmdName string, cfg *RestoreR
 		int64(len(ranges)+len(files)),
 		!cfg.LogProgress)
 
-	// RawKV restore does not need to rewrite keys.
-	rewrite := &restore.RewriteRules{}
-	err = restore.SplitRanges(ctx, client, ranges, rewrite, updateCh)
+	err = restore.SplitRanges(ctx, client, ranges, nil, updateCh)
 	if err != nil {
 		return errors.Trace(err)
 	}

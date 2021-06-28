@@ -1,6 +1,6 @@
 # BR
 
-[![Build Status](https://internal.pingcap.net/idc-jenkins/job/build_br_multi_branch/job/master/badge/icon)](https://internal.pingcap.net/idc-jenkins/job/build_br_multi_branch/job/master/)
+[![Build Status](https://internal.pingcap.net/idc-jenkins/job/build_br_multi_branch/job/release-4.0/badge/icon)](https://internal.pingcap.net/idc-jenkins/job/build_br_multi_branch/job/release-4.0/)
 [![codecov](https://codecov.io/gh/pingcap/br/branch/master/graph/badge.svg)](https://codecov.io/gh/pingcap/br)
 [![LICENSE](https://img.shields.io/github/license/pingcap/br.svg)](https://github.com/pingcap/br/blob/master/LICENSE)
 [![Language](https://img.shields.io/badge/Language-Go-blue.svg)](https://golang.org/)
@@ -17,13 +17,9 @@
 
 ## Documentation
 
-[Chinese Document](https://docs.pingcap.com/zh/tidb/v4.0/backup-and-restore-tool)
+[Chinese Document](https://pingcap.com/docs-cn/dev/how-to/maintain/backup-and-restore/br/)
 
-[English Document](https://docs.pingcap.com/tidb/v4.0/backup-and-restore-tool)
-
-[Backup SQL Statement](https://docs.pingcap.com/tidb/v4.0/sql-statement-backup)
-
-[Restore SQL Statement](https://docs.pingcap.com/tidb/v4.0/sql-statement-restore)
+[English Document](https://pingcap.com/docs/dev/how-to/maintain/backup-and-restore/br/)
 
 ## Building
 
@@ -34,11 +30,11 @@ $ make
 $ make test
 ```
 
-Notice BR supports building with Go version `Go >= 1.16`
+Notice BR supports building with Go version `Go >= 1.13`
 
 When BR is built successfully, you can find binary in the `bin` directory.
 
-## Quick start(docker-compose)
+## Quick start
 
 ```sh
 # Start TiDB cluster
@@ -86,46 +82,6 @@ mysql -uroot -htidb -P4000 -E -e "DROP DATABASE test; SHOW DATABASES;" && \
 bin/br restore full --pd pd0:2379 --storage "s3://mybucket/full" \
     --s3.endpoint="$S3_ENDPOINT"
 ```
-
-## Quick Start(tiup)
-
-```sh
-# Using tiup to start a TiDB cluster
-tiup playground --db 2 --pd 3 --kv 3 --monitor
-
-# Using tiup bench to generater test data.
-tiup bench tpcc --warehouses 1 prepare
-
-# How many row do we get? 300242 rows.
-mysql --host 127.0.0.1 --port 4000 -E -e "SELECT COUNT(*) FROM test.order_line" -u root -p
-
-# Build br.
-make build
-
-# Backup TPC-C test data.
-bin/br backup table --db test \
-	--table order_line \
-	-s local:///tmp/backup_test/ \
-	--pd ${PD_ADDR}:2379 \
-	--log-file backup_test.log \
-
-# Let's drop the table.
-mysql -uroot --host 127.0.0.1 -P4000 -E -e "USE test; DROP TABLE order_line; show tables" -u root -p
-
-# Restore from the backup.
-bin/br restore table --db test \
-	--table order_line \
-	-s local:///tmp/backup_test/ \
-	--pd ${PD_ADDR}:2379 \
-	--log-file restore_test.log
-
-# How many rows do we get after restore? Expected to be 300242 rows.
-mysql --host 127.0.0.1 -P4000 -E -e "SELECT COUNT(*) FROM test.order_line" -uroot -p
-```
-
-## Compatible test
-
-See [COMPATBILE_TEST](./COMPATIBLE_TEST.md)
 
 ## Contributing
 

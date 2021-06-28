@@ -9,11 +9,8 @@ import (
 	// revive is a file-based linter
 	_ "github.com/mgechev/revive/lint"
 
-	// gocovmerge merges multiple coverage profile into one
-	_ "github.com/wadey/gocovmerge"
-
-	// goveralls for uploading coverage profile to coverage tracking service
-	_ "github.com/mattn/goveralls"
+	// overalls performs test coverage
+	_ "github.com/go-playground/overalls"
 
 	// govet checks for code correctness
 	_ "github.com/dnephin/govet"
@@ -26,10 +23,4 @@ import (
 
 	// A stricter gofmt
 	_ "mvdan.cc/gofumpt/gofumports"
-
-	// vfsgen for embedding HTML resources
-	_ "github.com/shurcooL/vfsgen/cmd/vfsgendev"
-
-	// gogo for generating lightning checkpoint
-	_ "github.com/gogo/protobuf/proto"
 )

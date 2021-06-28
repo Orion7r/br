@@ -49,7 +49,9 @@ row_count_new=$(run_sql "SELECT COUNT(*) FROM $DB.$TABLE;" | awk '/COUNT/{print 
 
 echo "[original] row count: $row_count_ori, [after br] row count: $row_count_new"
 
-if [ "$row_count_ori" -ne "$row_count_new" ];then
+if [ "$row_count_ori" -eq "$row_count_new" ];then
+    echo "TEST: [$TEST_NAME] successed!"
+else
     echo "TEST: [$TEST_NAME] failed!"
     exit 1
 fi

@@ -12,15 +12,12 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/tikv/client-go/v2/config"
-	"github.com/tikv/client-go/v2/tikv"
+	"github.com/pingcap/tidb/config"
+	"github.com/pingcap/tidb/store/tikv"
 	"go.uber.org/zap"
 )
 
 var (
-	ca          = flag.String("ca", "", "CA certificate path for TLS connection")
-	cert        = flag.String("cert", "", "certificate path for TLS connection")
-	key         = flag.String("key", "", "private key path for TLS connection")
 	pdAddr      = flag.String("pd", "127.0.0.1:2379", "Address of PD")
 	runMode     = flag.String("mode", "", "Mode. One of 'rand-gen', 'checksum', 'scan', 'diff', 'delete' and 'put'")
 	startKeyStr = flag.String("start-key", "", "Start key in hex")
@@ -33,11 +30,7 @@ var (
 )
 
 func createClient(addr string) (*tikv.RawKVClient, error) {
-	cli, err := tikv.NewRawKVClient([]string{addr}, config.Security{
-		ClusterSSLCA:   *ca,
-		ClusterSSLCert: *cert,
-		ClusterSSLKey:  *key,
-	})
+	cli, err := tikv.NewRawKVClient([]string{addr}, config.Security{})
 	return cli, errors.Trace(err)
 }
 

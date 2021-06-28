@@ -18,8 +18,6 @@ DB="$TEST_NAME"
 TABLE="usertable"
 DDL_COUNT=10
 LOG=/$TEST_DIR/backup.log
-BACKUP_STAT=/$TEST_DIR/backup_stat
-RESOTRE_STAT=/$TEST_DIR/restore_stat
 
 run_sql "CREATE DATABASE $DB;"
 go-ycsb load mysql -P tests/$TEST_NAME/workload -p mysql.host=$TIDB_IP -p mysql.port=$TIDB_PORT -p mysql.user=root -p mysql.db=$DB
@@ -63,7 +61,7 @@ run_sql "analyze table $DB.$TABLE;"
 #        }
 #     ]
 # }
-run_curl https://$TIDB_STATUS_ADDR/stats/dump/$DB/$TABLE | jq '.columns.field0 | del(.last_update_version, .fm_sketch, .correlation)' > $BACKUP_STAT
+curl $TIDB_IP:10080/stats/dump/$DB/$TABLE | jq '.columns.field0' | jq 'del(.last_update_version)' > backup_stats
 
 # backup full
 echo "backup start with stats..."
@@ -74,7 +72,7 @@ cluster_index_before_backup=$(run_sql "show variables like '%cluster%';" | awk '
 run_br --pd $PD_ADDR backup full -s "local://$TEST_DIR/$DB" --ratelimit 5 --concurrency 4 --log-file $LOG --ignore-stats=false || cat $LOG
 checksum_count=$(cat $LOG | grep "checksum success" | wc -l | xargs)
 
-if [ "${checksum_count}" -lt "1" ];then
+if [ "${checksum_count}" != "1" ];then
     echo "TEST: [$TEST_NAME] fail on fast checksum"
     echo $(cat $LOG | grep checksum)
     exit 1
@@ -96,13 +94,12 @@ fi
 
 echo "restore full without stats..."
 run_br restore full -s "local://$TEST_DIR/${DB}_disable_stats" --pd $PD_ADDR
-curl $TIDB_IP:10080/stats/dump/$DB/$TABLE | jq '.columns.field0 | del(.last_update_version, .fm_sketch, .correlation)' > $RESOTRE_STAT
+curl $TIDB_IP:10080/stats/dump/$DB/$TABLE | jq '.columns.field0' | jq 'del(.last_update_version)' > restore_stats
 
 # stats should not be equal because we disable stats by default.
-if diff -q $BACKUP_STAT $RESOTRE_STAT > /dev/null
+if diff -q backup_stats restore_stats > /dev/null
 then
   echo "TEST: [$TEST_NAME] fail due to stats are equal"
-  grep ERROR $LOG
   exit 1
 fi
 
@@ -112,7 +109,7 @@ run_sql "DROP DATABASE $DB;"
 # restore full
 echo "restore start..."
 export GO_FAILPOINTS="github.com/pingcap/br/pkg/pdutil/PDEnabledPauseConfig=return(true)"
-run_br restore full -s "local://$TEST_DIR/$DB" --pd $PD_ADDR --log-file $LOG || { cat $LOG; exit 1; }
+run_br restore full -s "local://$TEST_DIR/$DB" --pd $PD_ADDR --log-file $LOG
 export GO_FAILPOINTS=""
 
 pause_count=$(cat $LOG | grep "pause configs successful"| wc -l | xargs)
@@ -135,16 +132,15 @@ if [ "${skip_count}" -gt "2" ];then
     exit 1
 fi
 
-run_curl https://$TIDB_STATUS_ADDR/stats/dump/$DB/$TABLE | jq '.columns.field0 | del(.last_update_version, .fm_sketch, .correlation)' > $RESOTRE_STAT
+curl $TIDB_IP:10080/stats/dump/$DB/$TABLE | jq '.columns.field0' | jq 'del(.last_update_version)' > restore_stats
 
-if diff -q $BACKUP_STAT $RESOTRE_STAT > /dev/null
+if diff -q backup_stats restore_stats > /dev/null
 then
   echo "stats are equal"
 else
   echo "TEST: [$TEST_NAME] fail due to stats are not equal"
-  grep ERROR $LOG
-  cat $BACKUP_STAT | head -n 1000
-  cat $RESOTRE_STAT | head -n 1000
+  cat $backup_stats | head 1000
+  cat $restore_stats | head 1000
   exit 1
 fi
 
@@ -160,6 +156,8 @@ echo "database $DB$ [original] row count: ${row_count_ori}, [after br] row count
 if $fail; then
     echo "TEST: [$TEST_NAME] failed!"
     exit 1
+else
+    echo "TEST: [$TEST_NAME] successed!"
 fi
 
 run_sql "DROP DATABASE $DB;"

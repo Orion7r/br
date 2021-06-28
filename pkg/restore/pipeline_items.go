@@ -6,15 +6,14 @@ import (
 	"context"
 	"sync"
 
-	"github.com/pingcap/br/pkg/metautil"
-
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pingcap/parser/model"
+	"github.com/DigitalChinaOpenSource/DCParser/model"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/br/pkg/glue"
 	"github.com/pingcap/br/pkg/rtree"
+	"github.com/pingcap/br/pkg/utils"
 )
 
 const (
@@ -141,7 +140,7 @@ func splitPrepareWork(ctx context.Context, client *Client, tables []*model.Table
 type CreatedTable struct {
 	RewriteRule *RewriteRules
 	Table       *model.TableInfo
-	OldTable    *metautil.Table
+	OldTable    *utils.Table
 }
 
 // TableWithRange is a CreatedTable that has been bind to some of key ranges.

@@ -14,20 +14,14 @@
 package kv
 
 import (
-	"bytes"
 	"fmt"
-	"math"
-	"sort"
 
 	"github.com/pingcap/errors"
-	sst "github.com/pingcap/kvproto/pkg/import_sstpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/parser/model"
-	"github.com/pingcap/parser/mysql"
-	"github.com/pingcap/tidb/kv"
+	"github.com/DigitalChinaOpenSource/DCParser/model"
+	"github.com/DigitalChinaOpenSource/DCParser/mysql"
 	"github.com/pingcap/tidb/meta/autoid"
 	"github.com/pingcap/tidb/table"
-	"github.com/pingcap/tidb/table/tables"
 	"github.com/pingcap/tidb/tablecodec"
 	"github.com/pingcap/tidb/types"
 	"go.uber.org/zap"
@@ -37,153 +31,6 @@ import (
 )
 
 var extraHandleColumnInfo = model.NewExtraHandleColInfo()
-
-// Iter abstract iterator method for Ingester.
-type Iter interface {
-	// Seek seek to specify position.
-	// if key not found, seeks next key position in iter.
-	Seek(key []byte) bool
-	// Error return current error on this iter.
-	Error() error
-	// First moves this iter to the first key.
-	First() bool
-	// Last moves this iter to the last key.
-	Last() bool
-	// Valid check this iter reach the end.
-	Valid() bool
-	// Next moves this iter forward.
-	Next() bool
-	// Key represents current position pair's key.
-	Key() []byte
-	// Value represents current position pair's Value.
-	Value() []byte
-	// Close close this iter.
-	Close() error
-	// OpType represents operations of pair. currently we have two types.
-	// 1. Put
-	// 2. Delete
-	OpType() sst.Pair_OP
-}
-
-// IterProducer produces iterator with given range.
-type IterProducer interface {
-	// Produce produces iterator with given range [start, end).
-	Produce(start []byte, end []byte) Iter
-}
-
-// SimpleKVIterProducer represents kv iter producer.
-type SimpleKVIterProducer struct {
-	pairs Pairs
-}
-
-// NewSimpleKVIterProducer creates SimpleKVIterProducer.
-func NewSimpleKVIterProducer(pairs Pairs) IterProducer {
-	return &SimpleKVIterProducer{
-		pairs: pairs,
-	}
-}
-
-// Produce implements Iter.Producer.Produce.
-func (p *SimpleKVIterProducer) Produce(start []byte, end []byte) Iter {
-	startIndex := sort.Search(len(p.pairs), func(i int) bool {
-		return bytes.Compare(start, p.pairs[i].Key) < 1
-	})
-	endIndex := sort.Search(len(p.pairs), func(i int) bool {
-		return bytes.Compare(end, p.pairs[i].Key) < 1
-	})
-	if startIndex >= endIndex {
-		log.Warn("produce failed due to start key is large than end key",
-			zap.Binary("start", start), zap.Binary("end", end))
-		return nil
-	}
-	return newSimpleKVIter(p.pairs[startIndex:endIndex])
-}
-
-// SimpleKVIter represents simple pair iterator.
-// which is used for log restore.
-type SimpleKVIter struct {
-	index int
-	pairs Pairs
-}
-
-// newSimpleKVIter creates SimpleKVIter.
-func newSimpleKVIter(pairs Pairs) Iter {
-	return &SimpleKVIter{
-		index: -1,
-		pairs: pairs,
-	}
-}
-
-// Seek implements Iter.Seek.
-func (s *SimpleKVIter) Seek(key []byte) bool {
-	s.index = sort.Search(len(s.pairs), func(i int) bool {
-		return bytes.Compare(key, s.pairs[i].Key) < 1
-	})
-	return s.index < len(s.pairs)
-}
-
-// Error implements Iter.Error.
-func (s *SimpleKVIter) Error() error {
-	return nil
-}
-
-// First implements Iter.First.
-func (s *SimpleKVIter) First() bool {
-	if len(s.pairs) == 0 {
-		return false
-	}
-	s.index = 0
-	return true
-}
-
-// Last implements Iter.Last.
-func (s *SimpleKVIter) Last() bool {
-	if len(s.pairs) == 0 {
-		return false
-	}
-	s.index = len(s.pairs) - 1
-	return true
-}
-
-// Valid implements Iter.Valid.
-func (s *SimpleKVIter) Valid() bool {
-	return s.index >= 0 && s.index < len(s.pairs)
-}
-
-// Next implements Iter.Next.
-func (s *SimpleKVIter) Next() bool {
-	s.index++
-	return s.index < len(s.pairs)
-}
-
-// Key implements Iter.Key.
-func (s *SimpleKVIter) Key() []byte {
-	if s.index >= 0 && s.index < len(s.pairs) {
-		return s.pairs[s.index].Key
-	}
-	return nil
-}
-
-// Value implements Iter.Value.
-func (s *SimpleKVIter) Value() []byte {
-	if s.index >= 0 && s.index < len(s.pairs) {
-		return s.pairs[s.index].Val
-	}
-	return nil
-}
-
-// Close implements Iter.Close.
-func (s *SimpleKVIter) Close() error {
-	return nil
-}
-
-// OpType implements Iter.KeyIsDelete.
-func (s *SimpleKVIter) OpType() sst.Pair_OP {
-	if s.Valid() && s.pairs[s.index].IsDelete {
-		return sst.Pair_Delete
-	}
-	return sst.Pair_Put
-}
 
 // Encoder encodes a row of SQL values into some opaque type which can be
 // consumed by OpenEngine.WriteEncoded.
@@ -227,13 +74,9 @@ type tableKVEncoder struct {
 
 // NewTableKVEncoder creates the Encoder.
 func NewTableKVEncoder(tbl table.Table, options *SessionOptions) Encoder {
-	se := newSession(options)
-	// Set CommonAddRecordCtx to session to reuse the slices and BufStore in AddRecord
-	recordCtx := tables.NewCommonAddRecordCtx(len(tbl.Cols()))
-	tables.SetAddRecordCtx(se, recordCtx)
 	return &tableKVEncoder{
 		tbl: tbl,
-		se:  se,
+		se:  newSession(options),
 	}
 }
 
@@ -328,7 +171,7 @@ func (kvcodec *tableKVEncoder) AddRecord(
 		case j >= 0 && j < len(row):
 			value, err = table.CastValue(kvcodec.se, row[j], col.ToInfo(), false, false)
 			if err == nil {
-				err = col.HandleBadNull(&value, kvcodec.se.vars.StmtCtx)
+				value, err = col.HandleBadNull(value, kvcodec.se.vars.StmtCtx)
 			}
 		case isAutoIncCol:
 			// we still need a conversion, e.g. to catch overflow with a TINYINT column.
@@ -353,7 +196,7 @@ func (kvcodec *tableKVEncoder) AddRecord(
 		}
 		if isAutoIncCol {
 			// TODO use auto incremental type
-			_ = kvcodec.tbl.RebaseAutoID(kvcodec.se, getAutoRecordID(value, &col.FieldType), false, autoid.RowIDAllocType)
+			_ = kvcodec.tbl.RebaseAutoID(kvcodec.se, value.GetInt64(), false, autoid.RowIDAllocType)
 		}
 	}
 
@@ -385,21 +228,6 @@ func (kvcodec *tableKVEncoder) AddRecord(
 	return Pairs(pairs), size, nil
 }
 
-// get record value for auto-increment field
-//
-// See: https://github.com/pingcap/tidb/blob/47f0f15b14ed54fc2222f3e304e29df7b05e6805/executor/insert_common.go#L781-L852
-// TODO: merge this with pkg/lightning/backend/kv/sql2kv.go
-func getAutoRecordID(d types.Datum, target *types.FieldType) int64 {
-	switch target.Tp {
-	case mysql.TypeFloat, mysql.TypeDouble:
-		return int64(math.Round(d.GetFloat64()))
-	case mysql.TypeTiny, mysql.TypeShort, mysql.TypeInt24, mysql.TypeLong, mysql.TypeLonglong:
-		return d.GetInt64()
-	default:
-		panic(fmt.Sprintf("unsupported auto-increment field type '%d'", target.Tp))
-	}
-}
-
 // RemoveRecord encode a row of data into KV pairs.
 func (kvcodec *tableKVEncoder) RemoveRecord(
 	row []types.Datum,
@@ -423,7 +251,7 @@ func (kvcodec *tableKVEncoder) RemoveRecord(
 		case j >= 0 && j < len(row):
 			value, err = table.CastValue(kvcodec.se, row[j], col.ToInfo(), false, false)
 			if err == nil {
-				err = col.HandleBadNull(&value, kvcodec.se.vars.StmtCtx)
+				value, err = col.HandleBadNull(value, kvcodec.se.vars.StmtCtx)
 			}
 		case isAutoIncCol:
 			// we still need a conversion, e.g. to catch overflow with a TINYINT column.
@@ -436,7 +264,7 @@ func (kvcodec *tableKVEncoder) RemoveRecord(
 		}
 		record = append(record, value)
 	}
-	err = kvcodec.tbl.RemoveRecord(kvcodec.se, kv.IntHandle(rowID), record)
+	err = kvcodec.tbl.RemoveRecord(kvcodec.se, rowID, record)
 	if err != nil {
 		log.Error("kv remove record failed",
 			zapRow("originalRow", row),
@@ -478,25 +306,4 @@ func (kvs Pairs) ClassifyAndAppend(
 // Clear resets the Pairs.
 func (kvs Pairs) Clear() Pairs {
 	return kvs[:0]
-}
-
-// NextKey return the smallest []byte that is bigger than current bytes.
-// special case when key is empty, empty bytes means infinity in our context, so directly return itself.
-func NextKey(key []byte) []byte {
-	if len(key) == 0 {
-		return []byte{}
-	}
-
-	// in tikv <= 4.x, tikv will truncate the row key, so we should fetch the next valid row key
-	// See: https://github.com/tikv/tikv/blob/f7f22f70e1585d7ca38a59ea30e774949160c3e8/components/raftstore/src/coprocessor/split_observer.rs#L36-L41
-	if tablecodec.IsRecordKey(key) {
-		tableID, handle, _ := tablecodec.DecodeRecordKey(key)
-		return tablecodec.EncodeRowKeyWithHandle(tableID, handle.Next())
-	}
-
-	// if key is an index, directly append a 0x00 to the key.
-	res := make([]byte, 0, len(key)+1)
-	res = append(res, key...)
-	res = append(res, 0)
-	return res
 }

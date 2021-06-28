@@ -9,7 +9,7 @@ import (
 
 	"github.com/fsouza/fake-gcs-server/fakestorage"
 	. "github.com/pingcap/check"
-	backuppb "github.com/pingcap/kvproto/pkg/backup"
+	"github.com/pingcap/kvproto/pkg/backup"
 )
 
 func (r *testStorageSuite) TestGCS(c *C) {
@@ -23,7 +23,7 @@ func (r *testStorageSuite) TestGCS(c *C) {
 	bucketName := "testbucket"
 	server.CreateBucketWithOpts(fakestorage.CreateBucketOpts{Name: bucketName})
 
-	gcs := &backuppb.GCS{
+	gcs := &backup.GCS{
 		Bucket:          bucketName,
 		Prefix:          "a/b/",
 		StorageClass:    "NEARLINE",
@@ -31,13 +31,13 @@ func (r *testStorageSuite) TestGCS(c *C) {
 		CredentialsBlob: "Fake Credentials",
 	}
 	stg, err := newGCSStorage(ctx, gcs, &ExternalStorageOptions{
-		SendCredentials:  false,
-		CheckPermissions: []Permission{AccessBuckets},
-		HTTPClient:       server.HTTPClient(),
+		SendCredentials: false,
+		SkipCheckPath:   false,
+		HTTPClient:      server.HTTPClient(),
 	})
 	c.Assert(err, IsNil)
 
-	err = stg.WriteFile(ctx, "key", []byte("data"))
+	err = stg.Write(ctx, "key", []byte("data"))
 	c.Assert(err, IsNil)
 
 	rc, err := server.Client().Bucket(bucketName).Object("a/b/key").NewReader(ctx)
@@ -47,7 +47,7 @@ func (r *testStorageSuite) TestGCS(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(d, DeepEquals, []byte("data"))
 
-	d, err = stg.ReadFile(ctx, "key")
+	d, err = stg.Read(ctx, "key")
 	c.Assert(err, IsNil)
 	c.Assert(d, DeepEquals, []byte("data"))
 
@@ -74,7 +74,7 @@ func (r *testStorageSuite) TestNewGCSStorage(c *C) {
 	server.CreateBucketWithOpts(fakestorage.CreateBucketOpts{Name: bucketName})
 
 	{
-		gcs := &backuppb.GCS{
+		gcs := &backup.GCS{
 			Bucket:          bucketName,
 			Prefix:          "a/b/",
 			StorageClass:    "NEARLINE",
@@ -82,16 +82,16 @@ func (r *testStorageSuite) TestNewGCSStorage(c *C) {
 			CredentialsBlob: "FakeCredentials",
 		}
 		_, err := newGCSStorage(ctx, gcs, &ExternalStorageOptions{
-			SendCredentials:  true,
-			CheckPermissions: []Permission{AccessBuckets},
-			HTTPClient:       server.HTTPClient(),
+			SendCredentials: true,
+			SkipCheckPath:   false,
+			HTTPClient:      server.HTTPClient(),
 		})
 		c.Assert(err, IsNil)
 		c.Assert(gcs.CredentialsBlob, Equals, "FakeCredentials")
 	}
 
 	{
-		gcs := &backuppb.GCS{
+		gcs := &backup.GCS{
 			Bucket:          bucketName,
 			Prefix:          "a/b/",
 			StorageClass:    "NEARLINE",
@@ -99,9 +99,9 @@ func (r *testStorageSuite) TestNewGCSStorage(c *C) {
 			CredentialsBlob: "FakeCredentials",
 		}
 		_, err := newGCSStorage(ctx, gcs, &ExternalStorageOptions{
-			SendCredentials:  false,
-			CheckPermissions: []Permission{AccessBuckets},
-			HTTPClient:       server.HTTPClient(),
+			SendCredentials: false,
+			SkipCheckPath:   false,
+			HTTPClient:      server.HTTPClient(),
 		})
 		c.Assert(err, IsNil)
 		c.Assert(gcs.CredentialsBlob, Equals, "")
@@ -120,7 +120,7 @@ func (r *testStorageSuite) TestNewGCSStorage(c *C) {
 		defer os.Unsetenv("GOOGLE_APPLICATION_CREDENTIALS")
 		c.Assert(err, IsNil)
 
-		gcs := &backuppb.GCS{
+		gcs := &backup.GCS{
 			Bucket:          bucketName,
 			Prefix:          "a/b/",
 			StorageClass:    "NEARLINE",
@@ -128,9 +128,9 @@ func (r *testStorageSuite) TestNewGCSStorage(c *C) {
 			CredentialsBlob: "",
 		}
 		_, err = newGCSStorage(ctx, gcs, &ExternalStorageOptions{
-			SendCredentials:  true,
-			CheckPermissions: []Permission{AccessBuckets},
-			HTTPClient:       server.HTTPClient(),
+			SendCredentials: true,
+			SkipCheckPath:   false,
+			HTTPClient:      server.HTTPClient(),
 		})
 		c.Assert(err, IsNil)
 		c.Assert(gcs.CredentialsBlob, Equals, `{"type": "service_account"}`)
@@ -149,7 +149,7 @@ func (r *testStorageSuite) TestNewGCSStorage(c *C) {
 		defer os.Unsetenv("GOOGLE_APPLICATION_CREDENTIALS")
 		c.Assert(err, IsNil)
 
-		gcs := &backuppb.GCS{
+		gcs := &backup.GCS{
 			Bucket:          bucketName,
 			Prefix:          "a/b/",
 			StorageClass:    "NEARLINE",
@@ -157,9 +157,9 @@ func (r *testStorageSuite) TestNewGCSStorage(c *C) {
 			CredentialsBlob: "",
 		}
 		s, err := newGCSStorage(ctx, gcs, &ExternalStorageOptions{
-			SendCredentials:  false,
-			CheckPermissions: []Permission{AccessBuckets},
-			HTTPClient:       server.HTTPClient(),
+			SendCredentials: false,
+			SkipCheckPath:   false,
+			HTTPClient:      server.HTTPClient(),
 		})
 		c.Assert(err, IsNil)
 		c.Assert(gcs.CredentialsBlob, Equals, "")
@@ -168,7 +168,7 @@ func (r *testStorageSuite) TestNewGCSStorage(c *C) {
 
 	{
 		os.Unsetenv("GOOGLE_APPLICATION_CREDENTIALS")
-		gcs := &backuppb.GCS{
+		gcs := &backup.GCS{
 			Bucket:          bucketName,
 			Prefix:          "a/b/",
 			StorageClass:    "NEARLINE",
@@ -176,15 +176,15 @@ func (r *testStorageSuite) TestNewGCSStorage(c *C) {
 			CredentialsBlob: "",
 		}
 		_, err := newGCSStorage(ctx, gcs, &ExternalStorageOptions{
-			SendCredentials:  true,
-			CheckPermissions: []Permission{AccessBuckets},
-			HTTPClient:       server.HTTPClient(),
+			SendCredentials: true,
+			SkipCheckPath:   false,
+			HTTPClient:      server.HTTPClient(),
 		})
 		c.Assert(err, NotNil)
 	}
 
 	{
-		gcs := &backuppb.GCS{
+		gcs := &backup.GCS{
 			Bucket:          bucketName,
 			Prefix:          "a/b",
 			StorageClass:    "NEARLINE",
@@ -192,9 +192,9 @@ func (r *testStorageSuite) TestNewGCSStorage(c *C) {
 			CredentialsBlob: "FakeCredentials",
 		}
 		s, err := newGCSStorage(ctx, gcs, &ExternalStorageOptions{
-			SendCredentials:  false,
-			CheckPermissions: []Permission{AccessBuckets},
-			HTTPClient:       server.HTTPClient(),
+			SendCredentials: false,
+			SkipCheckPath:   false,
+			HTTPClient:      server.HTTPClient(),
 		})
 		c.Assert(err, IsNil)
 		c.Assert(gcs.CredentialsBlob, Equals, "")

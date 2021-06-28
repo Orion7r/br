@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -18,7 +17,7 @@ import (
 	"github.com/golang/mock/gomock"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
-	backuppb "github.com/pingcap/kvproto/pkg/backup"
+	"github.com/pingcap/kvproto/pkg/backup"
 
 	"github.com/pingcap/br/pkg/mock"
 	. "github.com/pingcap/br/pkg/storage"
@@ -30,12 +29,7 @@ type s3Suite struct {
 	storage    *S3Storage
 }
 
-type s3SuiteCustom struct{}
-
-var (
-	_ = Suite(&s3Suite{})
-	_ = Suite(&s3SuiteCustom{})
-)
+var _ = Suite(&s3Suite{})
 
 // FIXME: Cannot use the real SetUpTest/TearDownTest to set up the mock
 // otherwise the mock error will be ignored.
@@ -45,7 +39,7 @@ func (s *s3Suite) setUpTest(c gomock.TestReporter) {
 	s.s3 = mock.NewMockS3API(s.controller)
 	s.storage = NewS3StorageForTest(
 		s.s3,
-		&backuppb.S3{
+		&backup.S3{
 			Region:       "us-west-2",
 			Bucket:       "bucket",
 			Prefix:       "prefix/",
@@ -130,7 +124,7 @@ func (s *s3Suite) TestApplyUpdate(c *C) {
 		name    string
 		options S3BackendOptions
 		setEnv  bool
-		s3      *backuppb.S3
+		s3      *backup.S3
 	}
 	testFn := func(test *testcase, c *C) {
 		c.Log(test.name)
@@ -151,7 +145,7 @@ func (s *s3Suite) TestApplyUpdate(c *C) {
 				Region:   "",
 				Endpoint: "",
 			},
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region: "us-east-1",
 				Bucket: "bucket",
 				Prefix: "prefix",
@@ -162,7 +156,7 @@ func (s *s3Suite) TestApplyUpdate(c *C) {
 			options: S3BackendOptions{
 				Region: "us-west-2",
 			},
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region: "us-west-2",
 				Bucket: "bucket",
 				Prefix: "prefix",
@@ -173,7 +167,7 @@ func (s *s3Suite) TestApplyUpdate(c *C) {
 			options: S3BackendOptions{
 				Endpoint: "https://s3.us-west-2",
 			},
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:   "us-east-1",
 				Endpoint: "https://s3.us-west-2",
 				Bucket:   "bucket",
@@ -185,7 +179,7 @@ func (s *s3Suite) TestApplyUpdate(c *C) {
 			options: S3BackendOptions{
 				Endpoint: "http://s3.us-west-2",
 			},
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:   "us-east-1",
 				Endpoint: "http://s3.us-west-2",
 				Bucket:   "bucket",
@@ -199,7 +193,7 @@ func (s *s3Suite) TestApplyUpdate(c *C) {
 				ForcePathStyle: true,
 				Provider:       "ceph",
 			},
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:         "us-west-2",
 				ForcePathStyle: true,
 				Bucket:         "bucket",
@@ -213,7 +207,7 @@ func (s *s3Suite) TestApplyUpdate(c *C) {
 				ForcePathStyle: true,
 				Provider:       "alibaba",
 			},
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:         "us-west-2",
 				ForcePathStyle: false,
 				Bucket:         "bucket",
@@ -227,7 +221,7 @@ func (s *s3Suite) TestApplyUpdate(c *C) {
 				ForcePathStyle: true,
 				Provider:       "netease",
 			},
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:         "us-west-2",
 				ForcePathStyle: false,
 				Bucket:         "bucket",
@@ -241,7 +235,7 @@ func (s *s3Suite) TestApplyUpdate(c *C) {
 				ForcePathStyle:        true,
 				UseAccelerateEndpoint: true,
 			},
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:         "us-west-2",
 				ForcePathStyle: false,
 				Bucket:         "bucket",
@@ -255,7 +249,7 @@ func (s *s3Suite) TestApplyUpdate(c *C) {
 				AccessKey:       "ab",
 				SecretAccessKey: "cd",
 			},
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:          "us-west-2",
 				AccessKey:       "ab",
 				SecretAccessKey: "cd",
@@ -273,23 +267,22 @@ func (s *s3Suite) TestApplyUpdate(c *C) {
 func (s *s3Suite) TestS3Storage(c *C) {
 	type testcase struct {
 		name           string
-		s3             *backuppb.S3
+		s3             *backup.S3
 		errReturn      bool
-		hackPermission []Permission
+		hackCheck      bool
 		sendCredential bool
 	}
 	testFn := func(test *testcase, c *C) {
 		c.Log(test.name)
 		ctx := aws.BackgroundContext()
-		s3 := &backuppb.StorageBackend{
-			Backend: &backuppb.StorageBackend_S3{
+		s3 := &backup.StorageBackend{
+			Backend: &backup.StorageBackend_S3{
 				S3: test.s3,
 			},
 		}
 		_, err := New(ctx, s3, &ExternalStorageOptions{
-			SendCredentials:  test.sendCredential,
-			CheckPermissions: test.hackPermission,
-			SkipCheckPath:    true,
+			SendCredentials: test.sendCredential,
+			SkipCheckPath:   test.hackCheck,
 		})
 		if test.errReturn {
 			c.Assert(err, NotNil)
@@ -305,65 +298,64 @@ func (s *s3Suite) TestS3Storage(c *C) {
 	tests := []testcase{
 		{
 			name: "no region and endpoint",
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:   "",
 				Endpoint: "",
 				Bucket:   "bucket",
 				Prefix:   "prefix",
 			},
 			errReturn:      true,
-			hackPermission: []Permission{AccessBuckets},
 			sendCredential: true,
 		},
 		{
 			name: "no region",
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:   "",
 				Endpoint: "http://10.1.2.3",
 				Bucket:   "bucket",
 				Prefix:   "prefix",
 			},
 			errReturn:      true,
-			hackPermission: []Permission{AccessBuckets},
 			sendCredential: true,
 		},
 		{
 			name: "no endpoint",
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:   "us-west-2",
 				Endpoint: "",
 				Bucket:   "bucket",
 				Prefix:   "prefix",
 			},
 			errReturn:      true,
-			hackPermission: []Permission{AccessBuckets},
 			sendCredential: true,
 		},
 		{
 			name: "no region",
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:   "",
 				Endpoint: "http://10.1.2.3",
 				Bucket:   "bucket",
 				Prefix:   "prefix",
 			},
 			errReturn:      false,
+			hackCheck:      true,
 			sendCredential: true,
 		},
 		{
 			name: "normal region",
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:   "us-west-2",
 				Endpoint: "",
 				Bucket:   "bucket",
 				Prefix:   "prefix",
 			},
 			errReturn:      false,
+			hackCheck:      true,
 			sendCredential: true,
 		},
 		{
 			name: "keys configured explicitly",
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:          "us-west-2",
 				AccessKey:       "ab",
 				SecretAccessKey: "cd",
@@ -371,39 +363,43 @@ func (s *s3Suite) TestS3Storage(c *C) {
 				Prefix:          "prefix",
 			},
 			errReturn:      false,
+			hackCheck:      true,
 			sendCredential: true,
 		},
 		{
 			name: "no access key",
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:          "us-west-2",
 				SecretAccessKey: "cd",
 				Bucket:          "bucket",
 				Prefix:          "prefix",
 			},
 			errReturn:      false,
+			hackCheck:      true,
 			sendCredential: true,
 		},
 		{
 			name: "no secret access key",
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:    "us-west-2",
 				AccessKey: "ab",
 				Bucket:    "bucket",
 				Prefix:    "prefix",
 			},
 			errReturn:      false,
+			hackCheck:      true,
 			sendCredential: true,
 		},
 		{
 			name: "no secret access key",
-			s3: &backuppb.S3{
+			s3: &backup.S3{
 				Region:    "us-west-2",
 				AccessKey: "ab",
 				Bucket:    "bucket",
 				Prefix:    "prefix",
 			},
 			errReturn:      false,
+			hackCheck:      true,
 			sendCredential: false,
 		},
 	}
@@ -434,7 +430,7 @@ func (s *s3Suite) TestS3Range(c *C) {
 	c.Assert(err, ErrorMatches, "invalid content range: 'bytes '.*")
 }
 
-// TestWriteNoError ensures the WriteFile API issues a PutObject request and wait
+// TestWriteNoError ensures the Write API issues a PutObject request and wait
 // until the object is available in the S3 bucket.
 func (s *s3Suite) TestWriteNoError(c *C) {
 	s.setUpTest(c)
@@ -463,11 +459,11 @@ func (s *s3Suite) TestWriteNoError(c *C) {
 		}).
 		After(putCall)
 
-	err := s.storage.WriteFile(ctx, "file", []byte("test"))
+	err := s.storage.Write(ctx, "file", []byte("test"))
 	c.Assert(err, IsNil)
 }
 
-// TestReadNoError ensures the ReadFile API issues a GetObject request and correctly
+// TestReadNoError ensures the Read API issues a GetObject request and correctly
 // read the entire body.
 func (s *s3Suite) TestReadNoError(c *C) {
 	s.setUpTest(c)
@@ -484,7 +480,7 @@ func (s *s3Suite) TestReadNoError(c *C) {
 			}, nil
 		})
 
-	content, err := s.storage.ReadFile(ctx, "file")
+	content, err := s.storage.Read(ctx, "file")
 	c.Assert(err, IsNil)
 	c.Assert(content, DeepEquals, []byte("test"))
 }
@@ -537,7 +533,7 @@ func (s *s3Suite) TestWriteError(c *C) {
 		PutObjectWithContext(ctx, gomock.Any()).
 		Return(nil, expectedErr)
 
-	err := s.storage.WriteFile(ctx, "file2", []byte("test"))
+	err := s.storage.Write(ctx, "file2", []byte("test"))
 	c.Assert(err, ErrorMatches, `\Q`+expectedErr.Error()+`\E`)
 }
 
@@ -553,10 +549,8 @@ func (s *s3Suite) TestReadError(c *C) {
 		GetObjectWithContext(ctx, gomock.Any()).
 		Return(nil, expectedErr)
 
-	_, err := s.storage.ReadFile(ctx, "file-missing")
-
-	c.Assert(err, ErrorMatches, "failed to read s3 file, file info: "+
-		"input.bucket='bucket', input.key='prefix/file-missing': "+expectedErr.Error())
+	_, err := s.storage.Read(ctx, "file-missing")
+	c.Assert(err, ErrorMatches, `\Q`+expectedErr.Error()+`\E`)
 }
 
 // TestFileExistsError checks that a HeadObject error is propagated.
@@ -654,9 +648,38 @@ func (s *s3Suite) TestOpenSeek(c *C) {
 	rand.Read(someRandomBytes)
 	// ^ we just want some random bytes for testing, we don't care about its security.
 
-	s.expectedCalls(ctx, c, someRandomBytes, []int{0, 998000, 990100}, func(data []byte, offset int) io.ReadCloser {
-		return ioutil.NopCloser(bytes.NewReader(data[offset:]))
-	})
+	// The first call should serve the first 64 KiB.
+	firstCall := s.s3.EXPECT().
+		GetObjectWithContext(ctx, gomock.Any()).
+		DoAndReturn(func(_ context.Context, input *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
+			c.Assert(aws.StringValue(input.Range), Equals, "bytes=0-")
+			return &s3.GetObjectOutput{
+				Body:         ioutil.NopCloser(bytes.NewReader(someRandomBytes)),
+				ContentRange: aws.String("bytes 0-999999/1000000"),
+			}, nil
+		})
+
+	secondCall := s.s3.EXPECT().
+		GetObjectWithContext(ctx, gomock.Any()).
+		DoAndReturn(func(_ context.Context, input *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
+			c.Assert(aws.StringValue(input.Range), Equals, "bytes=998000-")
+			return &s3.GetObjectOutput{
+				Body:         ioutil.NopCloser(bytes.NewReader(someRandomBytes[998000:])),
+				ContentRange: aws.String("bytes 998000-999999/1000000"),
+			}, nil
+		}).
+		After(firstCall)
+
+	s.s3.EXPECT().
+		GetObjectWithContext(ctx, gomock.Any()).
+		DoAndReturn(func(_ context.Context, input *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
+			c.Assert(aws.StringValue(input.Range), Equals, "bytes=990100-")
+			return &s3.GetObjectOutput{
+				Body:         ioutil.NopCloser(bytes.NewReader(someRandomBytes[990100:])),
+				ContentRange: aws.String("bytes 990100-999999/1000000"),
+			}, nil
+		}).
+		After(secondCall)
 
 	reader, err := s.storage.Open(ctx, "random")
 	c.Assert(err, IsNil)
@@ -695,125 +718,6 @@ func (s *s3Suite) TestOpenSeek(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(n, Equals, 100)
 	c.Assert(slice, DeepEquals, someRandomBytes[990100:990200])
-}
-
-type limitedBytesReader struct {
-	*bytes.Reader
-	offset int
-	limit  int
-}
-
-func (r *limitedBytesReader) Read(p []byte) (n int, err error) {
-	n, err = r.Reader.Read(p)
-	if err != nil {
-		return
-	}
-	if r.offset+n > r.limit {
-		return n, errors.New("read exceeded limit")
-	}
-	r.offset += n
-	return
-}
-
-func (s *s3Suite) expectedCalls(ctx context.Context, c *C, data []byte, startOffsets []int, newReader func(data []byte, offset int) io.ReadCloser) {
-	var lastCall *gomock.Call
-	for _, offset := range startOffsets {
-		thisOffset := offset
-		thisCall := s.s3.EXPECT().
-			GetObjectWithContext(ctx, gomock.Any()).
-			DoAndReturn(func(_ context.Context, input *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
-				c.Assert(aws.StringValue(input.Range), Equals, fmt.Sprintf("bytes=%d-", thisOffset))
-				return &s3.GetObjectOutput{
-					Body:         newReader(data, thisOffset),
-					ContentRange: aws.String(fmt.Sprintf("bytes %d-%d/%d", thisOffset, len(data)-1, len(data))),
-				}, nil
-			})
-		if lastCall != nil {
-			thisCall = thisCall.After(lastCall)
-		}
-		lastCall = thisCall
-	}
-}
-
-// TestS3ReaderWithRetryEOF check the Read with retry and end with io.EOF.
-func (s *s3Suite) TestS3ReaderWithRetryEOF(c *C) {
-	s.setUpTest(c)
-	defer s.tearDownTest()
-	ctx := aws.BackgroundContext()
-
-	someRandomBytes := make([]byte, 100)
-	rand.Read(someRandomBytes) //nolint:gosec
-	// ^ we just want some random bytes for testing, we don't care about its security.
-
-	s.expectedCalls(ctx, c, someRandomBytes, []int{0, 20, 50, 75}, func(data []byte, offset int) io.ReadCloser {
-		return ioutil.NopCloser(&limitedBytesReader{Reader: bytes.NewReader(data[offset:]), limit: 30})
-	})
-
-	reader, err := s.storage.Open(ctx, "random")
-	c.Assert(err, IsNil)
-	defer reader.Close()
-
-	var n int
-	slice := make([]byte, 30)
-	readAndCheck := func(cnt, offset int) {
-		n, err = io.ReadFull(reader, slice[:cnt])
-		c.Assert(err, IsNil)
-		c.Assert(n, Equals, cnt)
-		c.Assert(slice[:cnt], DeepEquals, someRandomBytes[offset:offset+cnt])
-	}
-
-	// first do some simple read...
-	readAndCheck(20, 0)
-
-	// two more small short read that is ok
-	readAndCheck(15, 20)
-	readAndCheck(15, 35)
-	readAndCheck(25, 50)
-	readAndCheck(20, 75)
-
-	// there only remains 10 bytes
-	n, err = reader.Read(slice)
-	c.Assert(err, IsNil)
-	c.Assert(n, Equals, 5)
-
-	_, err = reader.Read(slice)
-	c.Assert(err, Equals, io.EOF)
-}
-
-// TestS3ReaderWithRetryFailed check the Read with retry failed after maxRetryTimes.
-func (s *s3Suite) TestS3ReaderWithRetryFailed(c *C) {
-	s.setUpTest(c)
-	defer s.tearDownTest()
-	ctx := aws.BackgroundContext()
-
-	someRandomBytes := make([]byte, 100)
-	rand.Read(someRandomBytes) //nolint:gosec
-	// ^ we just want some random bytes for testing, we don't care about its security.
-
-	s.expectedCalls(ctx, c, someRandomBytes, []int{0, 20, 40, 60}, func(data []byte, offset int) io.ReadCloser {
-		return ioutil.NopCloser(&limitedBytesReader{Reader: bytes.NewReader(data[offset:]), limit: 30})
-	})
-
-	reader, err := s.storage.Open(ctx, "random")
-	c.Assert(err, IsNil)
-	defer reader.Close()
-
-	var n int
-	slice := make([]byte, 20)
-	readAndCheck := func(cnt, offset int) {
-		n, err = io.ReadFull(reader, slice[:cnt])
-		c.Assert(err, IsNil)
-		c.Assert(n, Equals, cnt)
-		c.Assert(slice[:cnt], DeepEquals, someRandomBytes[offset:offset+cnt])
-	}
-
-	// we can retry 3 times, so read will succeed for 4 times
-	for i := 0; i < 4; i++ {
-		readAndCheck(20, i*20)
-	}
-
-	_, err = reader.Read(slice)
-	c.Assert(err, ErrorMatches, "read exceeded limit")
 }
 
 // TestWalkDir checks WalkDir retrieves all directory content under a prefix.
@@ -870,7 +774,7 @@ func (s *s3Suite) TestWalkDir(c *C) {
 			}, nil
 		}).
 		After(firstCall)
-	thirdCall := s.s3.EXPECT().
+	s.s3.EXPECT().
 		ListObjectsWithContext(ctx, gomock.Any()).
 		DoAndReturn(func(_ context.Context, input *s3.ListObjectsInput) (*s3.ListObjectsOutput, error) {
 			c.Assert(aws.StringValue(input.Marker), Equals, aws.StringValue(contents[3].Key))
@@ -881,31 +785,6 @@ func (s *s3Suite) TestWalkDir(c *C) {
 			}, nil
 		}).
 		After(secondCall)
-	fourthCall := s.s3.EXPECT().
-		ListObjectsWithContext(ctx, gomock.Any()).
-		DoAndReturn(func(_ context.Context, input *s3.ListObjectsInput) (*s3.ListObjectsOutput, error) {
-			c.Assert(aws.StringValue(input.Bucket), Equals, "bucket")
-			c.Assert(aws.StringValue(input.Prefix), Equals, "prefix/")
-			c.Assert(aws.StringValue(input.Marker), Equals, "")
-			c.Assert(aws.Int64Value(input.MaxKeys), Equals, int64(4))
-			c.Assert(aws.StringValue(input.Delimiter), Equals, "")
-			return &s3.ListObjectsOutput{
-				IsTruncated: aws.Bool(true),
-				Contents:    contents[:4],
-			}, nil
-		}).
-		After(thirdCall)
-	s.s3.EXPECT().
-		ListObjectsWithContext(ctx, gomock.Any()).
-		DoAndReturn(func(_ context.Context, input *s3.ListObjectsInput) (*s3.ListObjectsOutput, error) {
-			c.Assert(aws.StringValue(input.Marker), Equals, aws.StringValue(contents[3].Key))
-			c.Assert(aws.Int64Value(input.MaxKeys), Equals, int64(4))
-			return &s3.ListObjectsOutput{
-				IsTruncated: aws.Bool(false),
-				Contents:    contents[4:],
-			}, nil
-		}).
-		After(fourthCall)
 
 	// Ensure we receive the items in order.
 	i := 0
@@ -922,109 +801,4 @@ func (s *s3Suite) TestWalkDir(c *C) {
 	)
 	c.Assert(err, IsNil)
 	c.Assert(i, Equals, len(contents))
-
-	// test with empty subDir
-	i = 0
-	err = s.storage.WalkDir(
-		ctx,
-		&WalkOption{ListCount: 4},
-		func(path string, size int64) error {
-			comment := Commentf("index = %d", i)
-			c.Assert("prefix/"+path, Equals, *contents[i].Key, comment)
-			c.Assert(size, Equals, *contents[i].Size, comment)
-			i++
-			return nil
-		},
-	)
-	c.Assert(err, IsNil)
-	c.Assert(i, Equals, len(contents))
-}
-
-// TestWalkDirBucket checks WalkDir retrieves all directory content under a bucket.
-func (s *s3SuiteCustom) TestWalkDirWithEmptyPrefix(c *C) {
-	controller := gomock.NewController(c)
-	s3API := mock.NewMockS3API(controller)
-	storage := NewS3StorageForTest(
-		s3API,
-		&backuppb.S3{
-			Region:       "us-west-2",
-			Bucket:       "bucket",
-			Prefix:       "",
-			Acl:          "acl",
-			Sse:          "sse",
-			StorageClass: "sc",
-		},
-	)
-	defer controller.Finish()
-	ctx := aws.BackgroundContext()
-
-	contents := []*s3.Object{
-		{
-			Key:  aws.String("sp/.gitignore"),
-			Size: aws.Int64(437),
-		},
-		{
-			Key:  aws.String("prefix/sp/01.jpg"),
-			Size: aws.Int64(27499),
-		},
-	}
-	firstCall := s3API.EXPECT().
-		ListObjectsWithContext(ctx, gomock.Any()).
-		DoAndReturn(func(_ context.Context, input *s3.ListObjectsInput) (*s3.ListObjectsOutput, error) {
-			c.Assert(aws.StringValue(input.Bucket), Equals, "bucket")
-			c.Assert(aws.StringValue(input.Prefix), Equals, "")
-			c.Assert(aws.StringValue(input.Marker), Equals, "")
-			c.Assert(aws.Int64Value(input.MaxKeys), Equals, int64(2))
-			c.Assert(aws.StringValue(input.Delimiter), Equals, "")
-			return &s3.ListObjectsOutput{
-				IsTruncated: aws.Bool(false),
-				Contents:    contents,
-			}, nil
-		})
-	s3API.EXPECT().
-		ListObjectsWithContext(ctx, gomock.Any()).
-		DoAndReturn(func(_ context.Context, input *s3.ListObjectsInput) (*s3.ListObjectsOutput, error) {
-			c.Assert(aws.StringValue(input.Bucket), Equals, "bucket")
-			c.Assert(aws.StringValue(input.Prefix), Equals, "sp/")
-			c.Assert(aws.StringValue(input.Marker), Equals, "")
-			c.Assert(aws.Int64Value(input.MaxKeys), Equals, int64(2))
-			c.Assert(aws.StringValue(input.Delimiter), Equals, "")
-			return &s3.ListObjectsOutput{
-				IsTruncated: aws.Bool(false),
-				Contents:    contents[:1],
-			}, nil
-		}).
-		After(firstCall)
-
-	// Ensure we receive the items in order.
-	i := 0
-	err := storage.WalkDir(
-		ctx,
-		&WalkOption{SubDir: "", ListCount: 2},
-		func(path string, size int64) error {
-			comment := Commentf("index = %d", i)
-			c.Assert(path, Equals, *contents[i].Key, comment)
-			c.Assert(size, Equals, *contents[i].Size, comment)
-			i++
-			return nil
-		},
-	)
-	c.Assert(err, IsNil)
-	c.Assert(i, Equals, len(contents))
-
-	// test with non-empty sub-dir
-	i = 0
-	err = storage.WalkDir(
-		ctx,
-		&WalkOption{SubDir: "sp", ListCount: 2},
-		func(path string, size int64) error {
-			comment := Commentf("index = %d", i)
-			c.Assert(path, Equals, *contents[i].Key, comment)
-			c.Assert(size, Equals, *contents[i].Size, comment)
-			i++
-			return nil
-		},
-	)
-	c.Assert(err, IsNil)
-	c.Assert(i, Equals, 1)
 }
