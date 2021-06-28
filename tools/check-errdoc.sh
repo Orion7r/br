@@ -17,5 +17,5 @@ set -euo pipefail
 cd -P .
 
 cp errors.toml /tmp/errors.toml.before
-./tools/bin/errdoc-gen --source . --module github.com/pingcap/br --output errors.toml
+./tools/bin/errdoc-gen --source . --module github.com/Orion7r/br --output errors.toml
 diff -q errors.toml /tmp/errors.toml.before
