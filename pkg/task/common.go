@@ -26,11 +26,11 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/pingcap/br/pkg/conn"
-	berrors "github.com/pingcap/br/pkg/errors"
-	"github.com/pingcap/br/pkg/glue"
-	"github.com/pingcap/br/pkg/storage"
-	"github.com/pingcap/br/pkg/utils"
+	"github.com/Orion7r/pr/pkg/conn"
+	berrors "github.com/Orion7r/pr/pkg/errors"
+	"github.com/Orion7r/pr/pkg/glue"
+	"github.com/Orion7r/pr/pkg/storage"
+	"github.com/Orion7r/pr/pkg/utils"
 )
 
 const (
@@ -492,7 +492,7 @@ func normalizePDURL(pd string, useTLS bool) (string, error) {
 // If the storage is set as gcs://bucket/prefix,
 // the SSTs are written correctly to gcs://bucket/prefix/*.sst
 // but the backupmeta is written wrongly to gcs://bucket/prefixbackupmeta.
-// see details https://github.com/pingcap/br/issues/675#issuecomment-753780742
+// see details https://github.com/Orion7r/pr/issues/675#issuecomment-753780742
 func gcsObjectNotFound(err error) bool {
 	return errors.Cause(err) == gcs.ErrObjectNotExist // nolint:errorlint
 }

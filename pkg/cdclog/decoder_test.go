@@ -19,7 +19,7 @@ import (
 	"testing"
 
 	"github.com/pingcap/check"
-	"github.com/pingcap/parser/mysql"
+	"github.com/DigitalChinaOpenSource/DCParser/mysql"
 )
 
 func Test(t *testing.T) { check.TestingT(t) }

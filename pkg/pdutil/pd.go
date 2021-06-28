@@ -25,8 +25,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	berrors "github.com/pingcap/br/pkg/errors"
-	"github.com/pingcap/br/pkg/utils"
+	berrors "github.com/Orion7r/pr/pkg/errors"
+	"github.com/Orion7r/pr/pkg/utils"
 )
 
 const (
@@ -85,7 +85,7 @@ var (
 		// TODO "leader-schedule-limit" and "region-schedule-limit" don't support ttl for now,
 		// but we still need set these config for compatible with old version.
 		// we need wait for https://github.com/tikv/pd/pull/3131 merged.
-		// see details https://github.com/pingcap/br/pull/592#discussion_r522684325
+		// see details https://github.com/Orion7r/pr/pull/592#discussion_r522684325
 		"leader-schedule-limit":       pauseConfigMulStoresCount,
 		"region-schedule-limit":       pauseConfigMulStoresCount,
 		"max-snapshot-count":          pauseConfigMulStoresCount,

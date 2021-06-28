@@ -30,7 +30,7 @@ done
 
 # backup full and kill tikv to test reset connection
 echo "backup with limit start..."
-export GO_FAILPOINTS="github.com/pingcap/br/pkg/backup/reset-retryable-error=1*return(true)"
+export GO_FAILPOINTS="github.com/Orion7r/pr/pkg/backup/reset-retryable-error=1*return(true)"
 run_br --pd $PD_ADDR backup full -s "local://$TEST_DIR/$DB-limit" --concurrency 4
 export GO_FAILPOINTS=""
 

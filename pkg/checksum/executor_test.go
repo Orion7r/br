@@ -8,15 +8,15 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/parser/model"
+	"github.com/DigitalChinaOpenSource/DCParser/model"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/util/testkit"
 	"github.com/pingcap/tidb/util/testleak"
 
-	"github.com/pingcap/br/pkg/checksum"
-	"github.com/pingcap/br/pkg/mock"
-	"github.com/pingcap/br/pkg/utils"
+	"github.com/Orion7r/pr/pkg/checksum"
+	"github.com/Orion7r/pr/pkg/mock"
+	"github.com/Orion7r/pr/pkg/utils"
 )
 
 func TestT(t *testing.T) {

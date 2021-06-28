@@ -19,7 +19,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"go.uber.org/zap"
 
-	berrors "github.com/pingcap/br/pkg/errors"
+	berrors "github.com/Orion7r/pr/pkg/errors"
 )
 
 // Version information.
@@ -139,7 +139,7 @@ func CheckClusterVersion(ctx context.Context, client pd.Client) error {
 				s.Address, tikvVersionString, BRReleaseVersion)
 		}
 
-		// BR(https://github.com/pingcap/br/pull/233) and TiKV(https://github.com/tikv/tikv/pull/7241) have breaking changes
+		// BR(https://github.com/Orion7r/pr/pull/233) and TiKV(https://github.com/tikv/tikv/pull/7241) have breaking changes
 		// if BR include #233 and TiKV not include #7241, BR will panic TiKV during restore
 		// These incompatible version is 3.1.0 and 4.0.0-rc.1
 		if tikvVersion.Major == 3 {

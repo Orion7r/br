@@ -1,5 +1,5 @@
 <!--
-Thank you for working on BR! Please read BR's [CONTRIBUTING](https://github.com/pingcap/br/blob/master/CONTRIBUTING.md) document **BEFORE** filing this PR.
+Thank you for working on BR! Please read BR's [CONTRIBUTING](https://github.com/Orion7r/pr/blob/master/CONTRIBUTING.md) document **BEFORE** filing this PR.
 -->
 
 ### What problem does this PR solve? <!--add issue link with summary if exists-->

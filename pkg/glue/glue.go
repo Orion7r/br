@@ -5,7 +5,7 @@ package glue
 import (
 	"context"
 
-	"github.com/pingcap/parser/model"
+	"github.com/DigitalChinaOpenSource/DCParser/model"
 	"github.com/pingcap/tidb/domain"
 	"github.com/pingcap/tidb/kv"
 	pd "github.com/tikv/pd/client"

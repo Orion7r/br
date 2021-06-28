@@ -1,13 +1,13 @@
 # BR
 
 [![Build Status](https://internal.pingcap.net/idc-jenkins/job/build_br_multi_branch/job/release-4.0/badge/icon)](https://internal.pingcap.net/idc-jenkins/job/build_br_multi_branch/job/release-4.0/)
-[![codecov](https://codecov.io/gh/pingcap/br/branch/master/graph/badge.svg)](https://codecov.io/gh/pingcap/br)
-[![LICENSE](https://img.shields.io/github/license/pingcap/br.svg)](https://github.com/pingcap/br/blob/master/LICENSE)
+[![codecov](https://codecov.io/gh/Orion7r/pr/branch/master/graph/badge.svg)](https://codecov.io/gh/pingcap/br)
+[![LICENSE](https://img.shields.io/github/license/pingcap/br.svg)](https://github.com/Orion7r/pr/blob/master/LICENSE)
 [![Language](https://img.shields.io/badge/Language-Go-blue.svg)](https://golang.org/)
 [![GoDoc](https://img.shields.io/badge/Godoc-reference-blue.svg)](https://godoc.org/github.com/pingcap/br)
 [![Go Report Card](https://goreportcard.com/badge/github.com/pingcap/br)](https://goreportcard.com/report/github.com/pingcap/br)
-[![GitHub release](https://img.shields.io/github/tag/pingcap/br.svg?label=release)](https://github.com/pingcap/br/releases)
-[![GitHub release date](https://img.shields.io/github/release-date/pingcap/br.svg)](https://github.com/pingcap/br/releases)
+[![GitHub release](https://img.shields.io/github/tag/pingcap/br.svg?label=release)](https://github.com/Orion7r/pr/releases)
+[![GitHub release date](https://img.shields.io/github/release-date/pingcap/br.svg)](https://github.com/Orion7r/pr/releases)
 
 **Backup & Restore (BR)** is a command-line tool for distributed backup and restoration of the TiDB cluster data.
 

@@ -13,8 +13,8 @@ import (
 	"github.com/pingcap/tidb/util/testkit"
 	"github.com/pingcap/tidb/util/testleak"
 
-	"github.com/pingcap/br/pkg/backup"
-	"github.com/pingcap/br/pkg/mock"
+	"github.com/Orion7r/pr/pkg/backup"
+	"github.com/Orion7r/pr/pkg/mock"
 )
 
 var _ = Suite(&testBackupSchemaSuite{})

@@ -13,7 +13,7 @@
 
 package utils
 
-import "github.com/pingcap/br/pkg/manual"
+import "github.com/Orion7r/pr/pkg/manual"
 
 const (
 	bigValueSize = 1 << 16 // 64K
