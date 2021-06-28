@@ -14,7 +14,7 @@ Before asking a question, make sure you have:
 
 - Searched existing Stack Overflow questions.
 - Googled your question.
-- Searched open and closed [GitHub issues](https://github.com/pingcap/br/issues?q=is%3Aissue)
+- Searched open and closed [GitHub issues](https://github.com/Orion7r/pr/issues?q=is%3Aissue)
 - Read the documentation:
     * [BR documentation](https://docs.pingcap.com/tidb/stable/backup-and-restore-tool)
     * [Lightning documentation](https://docs.pingcap.com/tidb/stable/tidb-lightning-overview)

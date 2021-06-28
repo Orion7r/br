@@ -20,8 +20,8 @@ import (
 	"github.com/pingcap/tidb/sessionctx"
 	pd "github.com/tikv/pd/client"
 
-	"github.com/pingcap/br/pkg/glue"
-	"github.com/pingcap/br/pkg/gluetikv"
+	"github.com/Orion7r/pr/pkg/glue"
+	"github.com/Orion7r/pr/pkg/gluetikv"
 )
 
 const (

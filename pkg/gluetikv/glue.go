@@ -11,9 +11,9 @@ import (
 	"github.com/pingcap/tidb/store/tikv"
 	pd "github.com/tikv/pd/client"
 
-	"github.com/pingcap/br/pkg/glue"
-	"github.com/pingcap/br/pkg/summary"
-	"github.com/pingcap/br/pkg/utils"
+	"github.com/Orion7r/pr/pkg/glue"
+	"github.com/Orion7r/pr/pkg/summary"
+	"github.com/Orion7r/pr/pkg/utils"
 )
 
 // Glue is an implementation of glue.Glue that accesses only TiKV without TiDB.

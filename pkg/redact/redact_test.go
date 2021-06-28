@@ -7,7 +7,7 @@ import (
 
 	. "github.com/pingcap/check"
 
-	"github.com/pingcap/br/pkg/redact"
+	"github.com/Orion7r/pr/pkg/redact"
 )
 
 type testRedactSuite struct{}

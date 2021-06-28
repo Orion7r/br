@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	berrors "github.com/pingcap/br/pkg/errors"
-	"github.com/pingcap/br/pkg/utils"
+	berrors "github.com/Orion7r/pr/pkg/errors"
+	"github.com/Orion7r/pr/pkg/utils"
 )
 
 const (

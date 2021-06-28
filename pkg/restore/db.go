@@ -13,8 +13,8 @@ import (
 	"github.com/pingcap/tidb/kv"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/br/pkg/glue"
-	"github.com/pingcap/br/pkg/utils"
+	"github.com/Orion7r/pr/pkg/glue"
+	"github.com/Orion7r/pr/pkg/utils"
 )
 
 // DB is a TiDB instance, not thread-safe.
@@ -117,7 +117,7 @@ func (db *DB) CreateTable(ctx context.Context, table *utils.Table) error {
 			// TiDB sequence's behaviour is designed to keep the same pace
 			// among all nodes within the same cluster. so we need restore round.
 			// Here is a hack way to trigger sequence cycle round > 0 according to
-			// https://github.com/pingcap/br/pull/242#issuecomment-631307978
+			// https://github.com/Orion7r/pr/pull/242#issuecomment-631307978
 			// TODO use sql to set cycle round
 			nextSeqSQL := fmt.Sprintf("do nextval(%s.%s);",
 				utils.EncloseName(table.DB.Name.O),

@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/br/cmd"
+	"github.com/Orion7r/pr/cmd"
 )
 
 func main() {

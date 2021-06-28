@@ -17,7 +17,7 @@ import (
 	"github.com/pingcap/tipb/go-tipb"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/br/pkg/utils"
+	"github.com/Orion7r/pr/pkg/utils"
 )
 
 // ExecutorBuilder is used to build a "kv.Request".

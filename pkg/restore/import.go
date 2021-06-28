@@ -23,10 +23,10 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
-	berrors "github.com/pingcap/br/pkg/errors"
-	"github.com/pingcap/br/pkg/logutil"
-	"github.com/pingcap/br/pkg/summary"
-	"github.com/pingcap/br/pkg/utils"
+	berrors "github.com/Orion7r/pr/pkg/errors"
+	"github.com/Orion7r/pr/pkg/logutil"
+	"github.com/Orion7r/pr/pkg/summary"
+	"github.com/Orion7r/pr/pkg/utils"
 )
 
 const (

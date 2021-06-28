@@ -1,4 +1,4 @@
-module github.com/pingcap/br/_tools
+module github.com/Orion7r/pr/_tools
 
 go 1.13
 

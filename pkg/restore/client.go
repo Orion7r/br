@@ -34,15 +34,15 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/pingcap/br/pkg/checksum"
-	"github.com/pingcap/br/pkg/conn"
-	berrors "github.com/pingcap/br/pkg/errors"
-	"github.com/pingcap/br/pkg/glue"
-	"github.com/pingcap/br/pkg/logutil"
-	"github.com/pingcap/br/pkg/pdutil"
-	"github.com/pingcap/br/pkg/storage"
-	"github.com/pingcap/br/pkg/summary"
-	"github.com/pingcap/br/pkg/utils"
+	"github.com/Orion7r/pr/pkg/checksum"
+	"github.com/Orion7r/pr/pkg/conn"
+	berrors "github.com/Orion7r/pr/pkg/errors"
+	"github.com/Orion7r/pr/pkg/glue"
+	"github.com/Orion7r/pr/pkg/logutil"
+	"github.com/Orion7r/pr/pkg/pdutil"
+	"github.com/Orion7r/pr/pkg/storage"
+	"github.com/Orion7r/pr/pkg/summary"
+	"github.com/Orion7r/pr/pkg/utils"
 )
 
 // defaultChecksumConcurrency is the default number of the concurrent
@@ -62,13 +62,13 @@ type Client struct {
 	ddlJobs    []*model.Job
 	backupMeta *backup.BackupMeta
 	// TODO Remove this field or replace it with a []*DB,
-	// since https://github.com/pingcap/br/pull/377 needs more DBs to speed up DDL execution.
+	// since https://github.com/Orion7r/pr/pull/377 needs more DBs to speed up DDL execution.
 	// And for now, we must inject a pool of DBs to `Client.GoCreateTables`, otherwise there would be a race condition.
 	// This is dirty: why we need DBs from different sources?
 	// By replace it with a []*DB, we can remove the dirty parameter of `Client.GoCreateTable`,
 	// along with them in some private functions.
 	// Before you do it, you can firstly read discussions at
-	// https://github.com/pingcap/br/pull/377#discussion_r446594501,
+	// https://github.com/Orion7r/pr/pull/377#discussion_r446594501,
 	// this probably isn't as easy as it seems like (however, not hard, too :D)
 	db              *DB
 	rateLimit       uint64

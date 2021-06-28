@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/tidb/types"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/br/pkg/kv"
+	"github.com/Orion7r/pr/pkg/kv"
 )
 
 // TableBuffer represents the kv buffer of this table.

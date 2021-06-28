@@ -30,8 +30,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	berrors "github.com/pingcap/br/pkg/errors"
-	"github.com/pingcap/br/pkg/logutil"
+	berrors "github.com/Orion7r/pr/pkg/errors"
+	"github.com/Orion7r/pr/pkg/logutil"
 )
 
 const (

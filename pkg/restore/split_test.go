@@ -19,8 +19,8 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 
-	"github.com/pingcap/br/pkg/restore"
-	"github.com/pingcap/br/pkg/rtree"
+	"github.com/Orion7r/pr/pkg/restore"
+	"github.com/Orion7r/pr/pkg/rtree"
 )
 
 type testClient struct {

@@ -12,7 +12,7 @@ services:
       - /tmp/br/docker/data:/data
       - /tmp/br/docker/logs:/tmp
       - /tmp/br/docker/logs:/logs
-      - ./bin:/go/src/github.com/pingcap/br/bin
+      - ./bin:/go/src/github.com/Orion7r/pr/bin
     command: -c "/usr/bin/tail -f /dev/null"
     depends_on:
       - "tidb"

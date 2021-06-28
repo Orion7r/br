@@ -19,7 +19,7 @@ import (
 
 	. "github.com/pingcap/check"
 
-	"github.com/pingcap/br/pkg/kv"
+	"github.com/Orion7r/pr/pkg/kv"
 )
 
 type testKVChcksumSuite struct{}

@@ -17,10 +17,10 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pingcap/br/pkg/checksum"
-	"github.com/pingcap/br/pkg/glue"
-	"github.com/pingcap/br/pkg/summary"
-	"github.com/pingcap/br/pkg/utils"
+	"github.com/Orion7r/pr/pkg/checksum"
+	"github.com/Orion7r/pr/pkg/glue"
+	"github.com/Orion7r/pr/pkg/summary"
+	"github.com/Orion7r/pr/pkg/utils"
 )
 
 const (

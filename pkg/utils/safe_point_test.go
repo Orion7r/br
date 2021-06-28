@@ -10,7 +10,7 @@ import (
 	"github.com/pingcap/tidb/util/testleak"
 	pd "github.com/tikv/pd/client"
 
-	"github.com/pingcap/br/pkg/utils"
+	"github.com/Orion7r/pr/pkg/utils"
 )
 
 var _ = Suite(&testSafePointSuite{})
