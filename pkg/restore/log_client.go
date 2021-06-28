@@ -30,12 +30,12 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/Orion7r/pr/pkg/cdclog"
-	berrors "github.com/Orion7r/pr/pkg/errors"
-	"github.com/Orion7r/pr/pkg/kv"
-	"github.com/Orion7r/pr/pkg/logutil"
-	"github.com/Orion7r/pr/pkg/storage"
-	"github.com/Orion7r/pr/pkg/utils"
+	"github.com/Orion7r/br/pkg/cdclog"
+	berrors "github.com/Orion7r/br/pkg/errors"
+	"github.com/Orion7r/br/pkg/kv"
+	"github.com/Orion7r/br/pkg/logutil"
+	"github.com/Orion7r/br/pkg/storage"
+	"github.com/Orion7r/br/pkg/utils"
 )
 
 const (

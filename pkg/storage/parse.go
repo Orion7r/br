@@ -12,7 +12,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/backup"
 
-	berrors "github.com/Orion7r/pr/pkg/errors"
+	berrors "github.com/Orion7r/br/pkg/errors"
 )
 
 // BackendOptions further configures the storage backend not expressed by the
@@ -24,7 +24,7 @@ type BackendOptions struct {
 
 // ParseRawURL parse raw url to url object.
 func ParseRawURL(rawURL string) (*url.URL, error) {
-	// https://github.com/Orion7r/pr/issues/603
+	// https://github.com/Orion7r/br/issues/603
 	// In aws the secret key may contain '/+=' and '+' has a special meaning in URL.
 	// Replace "+" by "%2B" here to avoid this problem.
 	rawURL = strings.ReplaceAll(rawURL, "+", "%2B")

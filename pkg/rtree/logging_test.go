@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/Orion7r/pr/pkg/rtree"
+	"github.com/Orion7r/br/pkg/rtree"
 )
 
 var _ = Suite(&testLoggingSuite{})

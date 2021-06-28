@@ -11,9 +11,9 @@ import (
 	"github.com/DigitalChinaOpenSource/DCParser/model"
 	"go.uber.org/zap"
 
-	"github.com/Orion7r/pr/pkg/glue"
-	"github.com/Orion7r/pr/pkg/rtree"
-	"github.com/Orion7r/pr/pkg/utils"
+	"github.com/Orion7r/br/pkg/glue"
+	"github.com/Orion7r/br/pkg/rtree"
+	"github.com/Orion7r/br/pkg/utils"
 )
 
 const (

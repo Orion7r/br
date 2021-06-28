@@ -19,7 +19,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 
-	"github.com/Orion7r/pr/pkg/storage"
+	"github.com/Orion7r/br/pkg/storage"
 )
 
 // EventPuller pulls next event in ts order.

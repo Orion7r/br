@@ -8,7 +8,7 @@ import (
 
 	. "github.com/pingcap/check"
 
-	"github.com/Orion7r/pr/pkg/rtree"
+	"github.com/Orion7r/br/pkg/rtree"
 )
 
 func Test(t *testing.T) {

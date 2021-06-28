@@ -15,8 +15,8 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	berrors "github.com/Orion7r/pr/pkg/errors"
-	"github.com/Orion7r/pr/pkg/logutil"
+	berrors "github.com/Orion7r/br/pkg/errors"
+	"github.com/Orion7r/br/pkg/logutil"
 )
 
 func Test(t *testing.T) {

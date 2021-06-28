@@ -7,11 +7,11 @@ See also,
 
 ## [3.1.0-beta.1] - 2020-01-10
 
-- Fix the inaccurate backup progress information [#127](https://github.com/Orion7r/pr/pull/127)
-- Improve the performance of splitting Regions [#122](https://github.com/Orion7r/pr/pull/122)
-- Add the backup and restore feature for partitioned tables [#137](https://github.com/Orion7r/pr/pull/137)
-- Add the feature of automatically scheduling PD schedulers [#123](https://github.com/Orion7r/pr/pull/123)
-- Fix the issue that data is overwritten after non `PKIsHandle` tables are restored [#139](https://github.com/Orion7r/pr/pull/139)
+- Fix the inaccurate backup progress information [#127](https://github.com/Orion7r/br/pull/127)
+- Improve the performance of splitting Regions [#122](https://github.com/Orion7r/br/pull/122)
+- Add the backup and restore feature for partitioned tables [#137](https://github.com/Orion7r/br/pull/137)
+- Add the feature of automatically scheduling PD schedulers [#123](https://github.com/Orion7r/br/pull/123)
+- Fix the issue that data is overwritten after non `PKIsHandle` tables are restored [#139](https://github.com/Orion7r/br/pull/139)
 
 ## [3.1.0-beta] - 2019-12-20
 

@@ -13,7 +13,7 @@ import (
 	"github.com/pingcap/tidb/tablecodec"
 	"github.com/pingcap/tidb/util/codec"
 
-	"github.com/Orion7r/pr/pkg/restore"
+	"github.com/Orion7r/br/pkg/restore"
 )
 
 var _ = Suite(&testRestoreUtilSuite{})

@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	berrors "github.com/Orion7r/pr/pkg/errors"
+	berrors "github.com/Orion7r/br/pkg/errors"
 )
 
 const (

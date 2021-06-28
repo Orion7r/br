@@ -108,7 +108,7 @@ run_sql "DROP DATABASE $DB;"
 
 # restore full
 echo "restore start..."
-export GO_FAILPOINTS="github.com/Orion7r/pr/pkg/pdutil/PDEnabledPauseConfig=return(true)"
+export GO_FAILPOINTS="github.com/Orion7r/br/pkg/pdutil/PDEnabledPauseConfig=return(true)"
 run_br restore full -s "local://$TEST_DIR/$DB" --pd $PD_ADDR --log-file $LOG
 export GO_FAILPOINTS=""
 

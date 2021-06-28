@@ -27,7 +27,7 @@ start_services "$cur"
 run_sql "drop schema if exists $DB;"
 run_sql "create schema $DB;"
 
-# test alter pk issue https://github.com/Orion7r/pr/issues/215
+# test alter pk issue https://github.com/Orion7r/br/issues/215
 TABLE="t1"
 INCREMENTAL_TABLE="t1inc"
 
@@ -59,7 +59,7 @@ run_br --pd $PD_ADDR restore db --db "$DB" -s "local://$TEST_DIR/$DB$INCREMENTAL
 run_sql "drop schema $DB;"
 run_sql "create schema $DB;"
 
-# test max-index-length issue https://github.com/Orion7r/pr/issues/217
+# test max-index-length issue https://github.com/Orion7r/br/issues/217
 TABLE="t2"
 run_sql "create table $DB.$TABLE (a varchar(3072) primary key);"
 run_sql "insert into $DB.$TABLE values ('42');"
@@ -85,7 +85,7 @@ EOF
 echo "Restart cluster with allow-auto-random=true"
 start_services "$cur"
 
-# test auto random issue https://github.com/Orion7r/pr/issues/228
+# test auto random issue https://github.com/Orion7r/br/issues/228
 TABLE="t3"
 INCREMENTAL_TABLE="t3inc"
 run_sql "create schema $DB;"
@@ -111,7 +111,7 @@ run_br --pd $PD_ADDR restore db --db "$DB" -s "local://$TEST_DIR/$DB$INCREMENTAL
 
 run_sql "drop schema $DB;"
 
-# test auto random issue https://github.com/Orion7r/pr/issues/241
+# test auto random issue https://github.com/Orion7r/br/issues/241
 TABLE="t4"
 run_sql "create schema $DB;"
 run_sql "create table $DB.$TABLE(a bigint key auto_random(5));"

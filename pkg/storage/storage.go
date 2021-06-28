@@ -10,7 +10,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/backup"
 
-	berrors "github.com/Orion7r/pr/pkg/errors"
+	berrors "github.com/Orion7r/br/pkg/errors"
 )
 
 // WalkOption is the option of storage.WalkDir.

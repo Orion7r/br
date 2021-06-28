@@ -11,7 +11,7 @@ import (
 
 	"github.com/pingcap/errors"
 
-	berrors "github.com/Orion7r/pr/pkg/errors"
+	berrors "github.com/Orion7r/br/pkg/errors"
 )
 
 // ParseKey parse key by given format.

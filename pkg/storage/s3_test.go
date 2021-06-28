@@ -19,8 +19,8 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/backup"
 
-	"github.com/Orion7r/pr/pkg/mock"
-	. "github.com/Orion7r/pr/pkg/storage"
+	"github.com/Orion7r/br/pkg/mock"
+	. "github.com/Orion7r/br/pkg/storage"
 )
 
 type s3Suite struct {

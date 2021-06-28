@@ -19,7 +19,7 @@ import (
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 
-	berrors "github.com/Orion7r/pr/pkg/errors"
+	berrors "github.com/Orion7r/br/pkg/errors"
 )
 
 const (
@@ -210,7 +210,7 @@ func newGCSStorage(ctx context.Context, gcs *backup.GCS, opts *ExternalStorageOp
 	// If the storage is set as gcs://bucket/prefix/,
 	// the backupmeta is written correctly to gcs://bucket/prefix/backupmeta,
 	// but the SSTs are written wrongly to gcs://bucket/prefix//*.sst (note the extra slash).
-	// see details about case 2 at https://github.com/Orion7r/pr/issues/675#issuecomment-753780742
+	// see details about case 2 at https://github.com/Orion7r/br/issues/675#issuecomment-753780742
 	sstInPrefix := hasSSTFiles(ctx, bucket, gcs.Prefix)
 	sstInPrefixSlash := hasSSTFiles(ctx, bucket, gcs.Prefix+"//")
 	if sstInPrefixSlash && !sstInPrefix {

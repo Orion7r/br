@@ -10,11 +10,11 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	berrors "github.com/Orion7r/pr/pkg/errors"
-	"github.com/Orion7r/pr/pkg/glue"
-	"github.com/Orion7r/pr/pkg/restore"
-	"github.com/Orion7r/pr/pkg/summary"
-	"github.com/Orion7r/pr/pkg/utils"
+	berrors "github.com/Orion7r/br/pkg/errors"
+	"github.com/Orion7r/br/pkg/glue"
+	"github.com/Orion7r/br/pkg/restore"
+	"github.com/Orion7r/br/pkg/summary"
+	"github.com/Orion7r/br/pkg/utils"
 )
 
 // RestoreRawConfig is the configuration specific for raw kv restore tasks.

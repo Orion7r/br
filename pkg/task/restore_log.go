@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/Orion7r/pr/pkg/glue"
-	"github.com/Orion7r/pr/pkg/restore"
-	"github.com/Orion7r/pr/pkg/storage"
+	"github.com/Orion7r/br/pkg/glue"
+	"github.com/Orion7r/br/pkg/restore"
+	"github.com/Orion7r/br/pkg/storage"
 )
 
 const (

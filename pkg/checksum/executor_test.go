@@ -14,9 +14,9 @@ import (
 	"github.com/pingcap/tidb/util/testkit"
 	"github.com/pingcap/tidb/util/testleak"
 
-	"github.com/Orion7r/pr/pkg/checksum"
-	"github.com/Orion7r/pr/pkg/mock"
-	"github.com/Orion7r/pr/pkg/utils"
+	"github.com/Orion7r/br/pkg/checksum"
+	"github.com/Orion7r/br/pkg/mock"
+	"github.com/Orion7r/br/pkg/utils"
 )
 
 func TestT(t *testing.T) {

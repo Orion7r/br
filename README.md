@@ -1,13 +1,13 @@
 # BR
 
 [![Build Status](https://internal.pingcap.net/idc-jenkins/job/build_br_multi_branch/job/release-4.0/badge/icon)](https://internal.pingcap.net/idc-jenkins/job/build_br_multi_branch/job/release-4.0/)
-[![codecov](https://codecov.io/gh/Orion7r/pr/branch/master/graph/badge.svg)](https://codecov.io/gh/Orion7r/br)
-[![LICENSE](https://img.shields.io/github/license/Orion7r/br.svg)](https://github.com/Orion7r/pr/blob/master/LICENSE)
+[![codecov](https://codecov.io/gh/Orion7r/br/branch/master/graph/badge.svg)](https://codecov.io/gh/Orion7r/br)
+[![LICENSE](https://img.shields.io/github/license/Orion7r/br.svg)](https://github.com/Orion7r/br/blob/master/LICENSE)
 [![Language](https://img.shields.io/badge/Language-Go-blue.svg)](https://golang.org/)
 [![GoDoc](https://img.shields.io/badge/Godoc-reference-blue.svg)](https://godoc.org/github.com/Orion7r/br)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Orion7r/br)](https://goreportcard.com/report/github.com/Orion7r/br)
-[![GitHub release](https://img.shields.io/github/tag/Orion7r/br.svg?label=release)](https://github.com/Orion7r/pr/releases)
-[![GitHub release date](https://img.shields.io/github/release-date/Orion7r/br.svg)](https://github.com/Orion7r/pr/releases)
+[![GitHub release](https://img.shields.io/github/tag/Orion7r/br.svg?label=release)](https://github.com/Orion7r/br/releases)
+[![GitHub release date](https://img.shields.io/github/release-date/Orion7r/br.svg)](https://github.com/Orion7r/br/releases)
 
 **Backup & Restore (BR)** is a command-line tool for distributed backup and restoration of the TiDB cluster data.
 

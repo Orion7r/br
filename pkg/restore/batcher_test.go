@@ -12,14 +12,14 @@ import (
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 
-	"github.com/Orion7r/pr/pkg/restore"
+	"github.com/Orion7r/br/pkg/restore"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/DigitalChinaOpenSource/DCParser/model"
 
-	"github.com/Orion7r/pr/pkg/rtree"
-	"github.com/Orion7r/pr/pkg/utils"
+	"github.com/Orion7r/br/pkg/rtree"
+	"github.com/Orion7r/br/pkg/utils"
 )
 
 type testBatcherSuite struct{}

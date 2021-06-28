@@ -26,8 +26,8 @@ import (
 	"github.com/pingcap/tidb/types"
 	"go.uber.org/zap"
 
-	"github.com/Orion7r/pr/pkg/logutil"
-	"github.com/Orion7r/pr/pkg/redact"
+	"github.com/Orion7r/br/pkg/logutil"
+	"github.com/Orion7r/br/pkg/redact"
 )
 
 var extraHandleColumnInfo = model.NewExtraHandleColInfo()

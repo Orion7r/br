@@ -9,10 +9,10 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/Orion7r/pr/pkg/gluetikv"
-	"github.com/Orion7r/pr/pkg/summary"
-	"github.com/Orion7r/pr/pkg/task"
-	"github.com/Orion7r/pr/pkg/utils"
+	"github.com/Orion7r/br/pkg/gluetikv"
+	"github.com/Orion7r/br/pkg/summary"
+	"github.com/Orion7r/br/pkg/task"
+	"github.com/Orion7r/br/pkg/utils"
 )
 
 func runRestoreCommand(command *cobra.Command, cmdName string) error {

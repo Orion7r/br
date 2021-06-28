@@ -13,7 +13,7 @@ import (
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 
-	"github.com/Orion7r/pr/pkg/rtree"
+	"github.com/Orion7r/br/pkg/rtree"
 )
 
 // SendType is the 'type' of a send.

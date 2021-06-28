@@ -8,8 +8,8 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/Orion7r/pr/pkg/logutil"
-	"github.com/Orion7r/pr/pkg/redact"
+	"github.com/Orion7r/br/pkg/logutil"
+	"github.com/Orion7r/br/pkg/redact"
 )
 
 // String formats a range to a string.

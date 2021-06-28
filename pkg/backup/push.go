@@ -12,9 +12,9 @@ import (
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 
-	berrors "github.com/Orion7r/pr/pkg/errors"
-	"github.com/Orion7r/pr/pkg/glue"
-	"github.com/Orion7r/pr/pkg/rtree"
+	berrors "github.com/Orion7r/br/pkg/errors"
+	"github.com/Orion7r/br/pkg/glue"
+	"github.com/Orion7r/br/pkg/rtree"
 )
 
 // pushDown wraps a backup task.
